@@ -18,12 +18,11 @@ COPY --from=web /src/server/assets ./server/assets
 RUN cargo build --release -p orbien-server \
     && strip target/release/orbien-server
 
-FROM debian:bookworm-slim
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM alpine:3
+RUN mkdir -p /etc/orbien
 COPY --from=build /src/target/release/orbien-server /usr/local/bin/orbien-server
 COPY docker/conf/orbien-server.toml /etc/orbien/orbien-server.toml
+RUN chmod +x /usr/local/bin/orbien-server
 EXPOSE 9527/tcp 9527/udp 9528/udp 80/tcp 443/tcp 8020/tcp
-ENTRYPOINT ["orbien-server"]
+ENTRYPOINT ["/usr/local/bin/orbien-server"]
 CMD ["-c", "/etc/orbien/orbien-server.toml"]
