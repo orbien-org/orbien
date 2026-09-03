@@ -6,7 +6,7 @@
   <parent>
     <groupId>io.github.lxien</groupId>
     <artifactId>orbien</artifactId>
-    <version>3.5.0-beta.1</version>
+    <version>3.5.0</version>
   </parent>
 
   <artifactId>orbien-spring-boot-demo</artifactId>

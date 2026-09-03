@@ -21,7 +21,7 @@
     <img src="https://img.shields.io/badge/Rust-Tokio-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
   </a>
   <a href="https://github.com/orbien-org/orbien/releases">
-    <img src="https://img.shields.io/badge/orbien-3.5.0--beta.1-blue?style=for-the-badge" alt="orbien:3.5.0-beta.1"/>
+    <img src="https://img.shields.io/badge/orbien-3.5.0-blue?style=for-the-badge" alt="orbien:3.5.0"/>
   </a>
   <a href="https://somsubhra.github.io/github-release-stats/?username=orbien-org&repository=orbien">
     <img src="https://img.shields.io/github/downloads/orbien-org/orbien/total?style=for-the-badge" alt="Downloads"/>
