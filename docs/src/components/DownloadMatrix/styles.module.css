@@ -79,6 +79,13 @@
   background: rgba(22, 119, 255, 0.05);
 }
 
+.downloadCell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.28rem;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
@@ -101,6 +108,15 @@
   filter: brightness(1.05);
   color: #fff !important;
   text-decoration: none !important;
+}
+
+.size {
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--ifm-color-emphasis-600);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .missing {

@@ -4,10 +4,13 @@
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
+    "fetch-release-manifest": "node scripts/fetch-release-manifest.mjs",
+    "prebuild": "node scripts/fetch-release-manifest.mjs",
     "start": "docusaurus start --no-open",
     "start:en": "docusaurus start --locale en --no-open",
     "build": "docusaurus build",
     "swizzle": "docusaurus swizzle",
+    "predeploy": "node scripts/fetch-release-manifest.mjs",
     "deploy": "docusaurus deploy",
     "clear": "docusaurus clear",
     "serve": "docusaurus serve --no-open",

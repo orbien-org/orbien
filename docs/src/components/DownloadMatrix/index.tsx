@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState, type ReactNode} from 'react';
 import clsx from 'clsx';
 import Translate, {translate} from '@docusaurus/Translate';
 
+import releaseManifest from '@site/src/data/release-manifest.json';
 import styles from './styles.module.css';
 
 const REPO = 'orbien-org/orbien';
@@ -25,6 +26,17 @@ type Row = {
     libc?: LibcId;
     noteId: NoteId;
 };
+
+type ReleaseManifest = {
+    version: string;
+    fetchedAt?: string;
+    assets: Record<string, number>;
+};
+
+const MANIFEST = releaseManifest as ReleaseManifest;
+const VERSION = MANIFEST.version || FALLBACK_VERSION;
+const ASSET_SIZES = MANIFEST.assets ?? {};
+const ASSET_SET = new Set(Object.keys(ASSET_SIZES));
 
 const RELEASE_BUILDS: ReadonlySet<string> = new Set([
     'orbien-server|linux|amd64|gnu',
@@ -192,6 +204,24 @@ function assetUrl(filename: string, version: string): string {
     return `https://github.com/${REPO}/releases/download/v${version}/${filename}`;
 }
 
+function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes < 0) {
+        return '';
+    }
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    const units = ['KB', 'MB', 'GB'] as const;
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+        value /= 1024;
+        unit += 1;
+    }
+    const digits = value >= 100 || unit === 0 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${units[unit]}`;
+}
+
 function detectOs(): OsId | null {
     if (typeof navigator === 'undefined') {
         return null;
@@ -213,45 +243,12 @@ function detectOs(): OsId | null {
 }
 
 export default function DownloadMatrix(): ReactNode {
-    const [version, setVersion] = useState(FALLBACK_VERSION);
-    const [assetSet, setAssetSet] = useState<Set<string> | null>(null);
     const [detected, setDetected] = useState<OsId | null>(null);
+    const version = VERSION;
+    const hasAssetList = ASSET_SET.size > 0;
 
     useEffect(() => {
         setDetected(detectOs());
-    }, []);
-
-    useEffect(() => {
-        let cancelled = false;
-        (async () => {
-            try {
-                const res = await fetch(
-                    `https://api.github.com/repos/${REPO}/releases/latest`,
-                    {headers: {Accept: 'application/vnd.github+json'}},
-                );
-                if (!res.ok) {
-                    return;
-                }
-                const data = (await res.json()) as {
-                    tag_name?: string;
-                    assets?: { name: string }[];
-                };
-                if (cancelled) {
-                    return;
-                }
-                const tag = data.tag_name?.replace(/^v/, '');
-                if (tag) {
-                    setVersion(tag);
-                }
-                if (data.assets) {
-                    setAssetSet(new Set(data.assets.map((a) => a.name)));
-                }
-            } catch {
-            }
-        })();
-        return () => {
-            cancelled = true;
-        };
     }, []);
 
     const osRowSpans = useMemo(() => {
@@ -353,20 +350,36 @@ export default function DownloadMatrix(): ReactNode {
                                         row.arch,
                                         isDesktop ? undefined : rowLibc,
                                     );
-                                    const published = assetSet
-                                        ? assetSet.has(file)
+                                    const published = hasAssetList
+                                        ? ASSET_SET.has(file)
                                         : true;
                                     const showLink = built && published;
+                                    const sizeBytes = ASSET_SIZES[file];
+                                    const sizeLabel =
+                                        typeof sizeBytes === 'number'
+                                            ? formatBytes(sizeBytes)
+                                            : '';
                                     return (
                                         <td key={p.id}>
                                             {showLink ? (
-                                                <a
-                                                    className={styles.badge}
-                                                    href={assetUrl(file, version)}
-                                                    title={file}
-                                                    rel="noopener noreferrer">
-                                                    {label}
-                                                </a>
+                                                <div className={styles.downloadCell}>
+                                                    <a
+                                                        className={styles.badge}
+                                                        href={assetUrl(file, version)}
+                                                        title={
+                                                            sizeLabel
+                                                                ? `${file} (${sizeLabel})`
+                                                                : file
+                                                        }
+                                                        rel="noopener noreferrer">
+                                                        {label}
+                                                    </a>
+                                                    {sizeLabel ? (
+                                                        <span className={styles.size}>
+                                                            {sizeLabel}
+                                                        </span>
+                                                    ) : null}
+                                                </div>
                                             ) : null}
                                         </td>
                                     );
