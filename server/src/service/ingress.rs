@@ -24,9 +24,10 @@ impl Service {
         stream: TcpStream,
         peer: SocketAddr,
     ) -> Result<()> {
-        let mut peek_buf = [0u8; 16];
+        let ws_path = self.cfg.transport.ws_path.as_str();
+        let mut peek_buf = vec![0u8; 4 + ws_path.len()];
         let n = stream.peek(&mut peek_buf).await.unwrap_or(0);
-        let physical = if transport::is_websocket_http_request(&peek_buf[..n]) {
+        let physical = if transport::is_websocket_http_request(&peek_buf[..n], ws_path) {
             tracing::debug!(%peer, transport = "websocket", "upgrade");
             transport::accept_websocket(stream).await?
         } else {

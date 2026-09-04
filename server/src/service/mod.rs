@@ -78,7 +78,7 @@ impl Service {
         let tcp_listener = TcpListener::bind(&tcp_addr).await?;
         tracing::info!(
             %tcp_addr,
-            ws_path = transport::ORBIEN_WEBSOCKET_PATH,
+            ws_path = %this.cfg.transport.ws_path,
             tcp_mux = this.cfg.transport.tcp_mux,
             "tcp/websocket control/data listener ready"
         );

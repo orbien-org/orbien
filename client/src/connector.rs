@@ -76,6 +76,7 @@ pub async fn build_connector(cfg: &ClientConfig) -> Result<Arc<dyn Connector>> {
             } else {
                 Ok(Arc::new(WebsocketConnector {
                     endpoint: cfg.server_endpoint(),
+                    ws_path: cfg.transport.ws_path.clone(),
                     tls,
                 }))
             }
@@ -125,7 +126,7 @@ async fn dial_tcp_tls(cfg: &ClientConfig, tls: &TlsDialOpts) -> Result<DynStream
 }
 
 async fn dial_ws_tls(cfg: &ClientConfig, tls: &TlsDialOpts) -> Result<DynStream> {
-    let stream = dial_websocket(&cfg.server_endpoint()).await?;
+    let stream = dial_websocket(&cfg.server_endpoint(), &cfg.transport.ws_path).await?;
     tls.maybe_wrap(stream).await
 }
 
@@ -168,13 +169,14 @@ impl Connector for TcpConnector {
 
 struct WebsocketConnector {
     endpoint: String,
+    ws_path: String,
     tls: TlsDialOpts,
 }
 
 #[async_trait]
 impl Connector for WebsocketConnector {
     async fn open(&self) -> Result<DynStream> {
-        let stream = dial_websocket(&self.endpoint).await?;
+        let stream = dial_websocket(&self.endpoint, &self.ws_path).await?;
         self.tls.maybe_wrap(stream).await
     }
 }

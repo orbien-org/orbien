@@ -10,10 +10,19 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{accept_async, client_async, WebSocketStream};
 
 pub const ORBIEN_WEBSOCKET_PATH: &str = "/~!orbien";
-const WS_GET_PREFIX: &[u8] = b"GET /~!orbien";
 
-pub fn is_websocket_http_request(peeked: &[u8]) -> bool {
-    peeked.len() >= WS_GET_PREFIX.len() && peeked.starts_with(WS_GET_PREFIX)
+pub fn normalize_ws_path(path: &str) -> String {
+    let t = path.trim();
+    if t.is_empty() {
+        ORBIEN_WEBSOCKET_PATH.to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+pub fn is_websocket_http_request(peeked: &[u8], path: &str) -> bool {
+    let prefix = format!("GET {path}");
+    peeked.starts_with(prefix.as_bytes())
 }
 
 pub async fn accept_websocket(stream: TcpStream) -> Result<DynStream> {
@@ -23,12 +32,12 @@ pub async fn accept_websocket(stream: TcpStream) -> Result<DynStream> {
     Ok(WsByteStream::new(ws).boxed())
 }
 
-pub async fn dial_websocket(endpoint: &str) -> Result<DynStream> {
+pub async fn dial_websocket(endpoint: &str, path: &str) -> Result<DynStream> {
     let stream = TcpStream::connect(endpoint)
         .await
         .with_context(|| format!("tcp dial for websocket {endpoint}"))?;
     crate::net::enable_nodelay(&stream);
-    let url = format!("ws://{endpoint}{ORBIEN_WEBSOCKET_PATH}");
+    let url = format!("ws://{endpoint}{path}");
     let (ws, _resp) = client_async(&url, stream)
         .await
         .with_context(|| format!("websocket client upgrade {url}"))?;
