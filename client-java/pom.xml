@@ -6,7 +6,7 @@
 
   <groupId>io.github.lxien</groupId>
   <artifactId>orbien</artifactId>
-  <version>3.5.0</version>
+  <version>3.6.0-dev</version>
   <packaging>pom</packaging>
 
   <name>orbien</name>
