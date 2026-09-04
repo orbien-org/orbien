@@ -1,6 +1,6 @@
 use super::stream::{boxed_stream, DynStream};
 use anyhow::{anyhow, Result};
-use futures::future::poll_fn;
+use std::future::poll_fn;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 

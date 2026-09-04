@@ -28,9 +28,15 @@ opt-level = "z"
 [workspace.dependencies]
 orbien-core = { path = "core" }
 orbien-client = { path = "client" }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "io-util",
+    "sync",
+    "time",
+] }
 tokio-util = { version = "0.7", features = ["io", "compat", "rt"] }
-futures = "0.3"
 yamux = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -39,7 +45,13 @@ thiserror = "2"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", default-features = false, features = [
+    "std",
+    "derive",
+    "help",
+    "usage",
+    "error-context",
+] }
 uuid = { version = "1", features = ["v4"] }
 hmac = "0.12"
 sha2 = "0.10"
