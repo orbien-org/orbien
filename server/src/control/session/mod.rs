@@ -46,6 +46,7 @@ pub struct Control {
     udp_ports: Arc<PortTable>,
     bg_tasks: Mutex<JoinSet<()>>,
     closed: AtomicBool,
+    cleaning: AtomicBool,
     finished: watch::Sender<bool>,
     activated: AtomicBool,
     pool_count: usize,
@@ -105,6 +106,7 @@ impl Control {
             udp_ports,
             bg_tasks: Mutex::new(JoinSet::new()),
             closed: AtomicBool::new(false),
+            cleaning: AtomicBool::new(false),
             finished,
             activated: AtomicBool::new(false),
             pool_count: pool_count.max(1),
@@ -223,7 +225,7 @@ impl Control {
             let timeout = self.effective_ping_timeout();
             if timeout > 0 {
                 let this = Arc::clone(&self);
-                self.bg_tasks.lock().await.spawn(async move {
+                self.spawn_bg(async move {
                     loop {
                         if this.closed.load(Ordering::SeqCst) {
                             break;
@@ -241,11 +243,12 @@ impl Control {
                                 timeout_secs = timeout,
                                 "heartbeat timeout"
                             );
-                            this.shutdown().await;
+                            this.signal_close();
                             break;
                         }
                     }
-                });
+                })
+                .await;
             }
         }
 
@@ -253,6 +256,7 @@ impl Control {
             if self.closed.load(Ordering::SeqCst) {
                 break;
             }
+            self.reap_bg_tasks().await;
             let msg = tokio::select! {
                 _ = self.shutdown_notify.notified() => {
                     break;
@@ -285,15 +289,35 @@ impl Control {
         Ok(())
     }
 
+    pub(super) fn signal_close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        self.shutdown_notify.notify_waiters();
+        self.data_notify.notify_waiters();
+    }
+
+    pub(super) async fn spawn_bg<F>(&self, fut: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let mut bg = self.bg_tasks.lock().await;
+        if self.cleaning.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        reap_join_set(&mut bg);
+        bg.spawn(fut);
+    }
+
+    async fn reap_bg_tasks(&self) {
+        let mut bg = self.bg_tasks.lock().await;
+        reap_join_set(&mut bg);
+    }
+
     pub async fn shutdown(&self) {
-        if self.closed.swap(true, Ordering::SeqCst) {
-            self.shutdown_notify.notify_waiters();
-            self.data_notify.notify_waiters();
+        self.signal_close();
+        if self.cleaning.swap(true, Ordering::SeqCst) {
             self.wait_finished().await;
             return;
         }
-        self.shutdown_notify.notify_waiters();
-        self.data_notify.notify_waiters();
         {
             let mut tm = self.tunnels.lock().await;
             for (name, detached) in tm.close_all().await {
@@ -305,9 +329,11 @@ impl Control {
             let mut writer = self.writer.lock().await;
             let _ = writer.shutdown().await;
         }
-        let mut bg = self.bg_tasks.lock().await;
-        bg.abort_all();
-        while bg.join_next().await.is_some() {}
+        {
+            let mut bg = self.bg_tasks.lock().await;
+            bg.abort_all();
+            while bg.join_next().await.is_some() {}
+        }
         self.mark_finished();
     }
 
@@ -357,6 +383,16 @@ impl Control {
         let mut writer = self.writer.lock().await;
         msg::write_msg(&mut *writer, &Message::Pong(Pong::default())).await?;
         Ok(())
+    }
+}
+
+fn reap_join_set(bg: &mut JoinSet<()>) {
+    while let Some(res) = bg.try_join_next() {
+        if let Err(e) = res {
+            if !e.is_cancelled() {
+                tracing::debug!(error = %e, "bg task join error");
+            }
+        }
     }
 }
 

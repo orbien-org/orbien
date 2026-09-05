@@ -381,6 +381,24 @@ impl Control {
     }
 
     async fn reader_loop(self: Arc<Self>) -> Result<ReaderEnd> {
+        let mut data_tasks = {
+            let mut slot = self.data_tasks.lock().await;
+            std::mem::take(&mut *slot)
+        };
+
+        let end = self.reader_loop_inner(&mut data_tasks).await;
+
+        {
+            let mut slot = self.data_tasks.lock().await;
+            *slot = data_tasks;
+        }
+        end
+    }
+
+    async fn reader_loop_inner(
+        self: &Arc<Self>,
+        data_tasks: &mut JoinSet<()>,
+    ) -> Result<ReaderEnd> {
         loop {
             if self.cancel.is_cancelled() {
                 return Ok(ReaderEnd::Closed);
@@ -389,6 +407,14 @@ impl Control {
             let msg = tokio::select! {
                 _ = self.cancel.cancelled() => {
                     return Ok(ReaderEnd::Closed);
+                }
+                joined = data_tasks.join_next(), if !data_tasks.is_empty() => {
+                    if let Some(Err(e)) = joined {
+                        if !e.is_cancelled() {
+                            tracing::debug!(error = %e, "data task join error");
+                        }
+                    }
+                    continue;
                 }
                 msg = async {
                     let mut reader = self.reader.lock().await;
@@ -407,9 +433,10 @@ impl Control {
                     return Ok(ReaderEnd::Kicked(k.reason));
                 }
                 Message::ReqDataConn(_) => {
-                    let ctl = Arc::clone(&self);
+                    while data_tasks.try_join_next().is_some() {}
+                    let ctl = Arc::clone(self);
                     let cancel = self.cancel.clone();
-                    self.data_tasks.lock().await.spawn(async move {
+                    data_tasks.spawn(async move {
                         tokio::select! {
                             _ = cancel.cancelled() => {}
                             res = ctl.handle_req_data_conn() => {
