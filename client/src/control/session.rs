@@ -365,17 +365,8 @@ impl Control {
 
     async fn register_all_tunnels(&self) -> Result<()> {
         let tunnels = self.cfg.read().await.tunnels.clone();
-        for p in &tunnels {
-            validate_tunnel(p)?;
-            let msg = build_new_tunnel_message(p)?;
-            self.tunnels.upsert(p)?;
-            let mut writer = self.writer.lock().await;
-            msg::write_msg(&mut *writer, &msg).await?;
-            tracing::info!(
-                name = %p.name,
-                protocol = %p.protocol,
-                "sent NewTunnel"
-            );
+        for tunnel in &tunnels {
+            self.register_tunnel(tunnel).await?;
         }
         Ok(())
     }
