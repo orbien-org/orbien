@@ -1,7 +1,7 @@
 use super::Control;
-use crate::metrics::ServerMetrics;
 use crate::tunnel::{
-    format_local_addr, HttpTunnel, HttpsTunnel, RegisteredTunnel, TcpTunnel, UdpTunnel,
+    format_local_addr, HttpTunnel, HttpsTunnel, PortTable, RegisteredTunnel, TcpTunnel,
+    TunnelOwner, UdpTunnel,
 };
 use anyhow::{anyhow, Result};
 use orbien_core::limit::BandwidthLimiter;
@@ -69,6 +69,55 @@ impl Control {
         }
     }
 
+    async fn claim_name(&self, name: &str) -> Result<TunnelOwner> {
+        let owner = self.owner();
+        self.prepare_name_slot(name).await;
+        self.tunnel_registry.try_insert(name, owner.clone())?;
+        Ok(owner)
+    }
+
+    fn release_name(&self, name: &str, owner: &TunnelOwner) {
+        self.tunnel_registry.remove_if_owner(name, owner);
+    }
+
+    fn claim_port(
+        &self,
+        ports: &PortTable,
+        port: u16,
+        name: &str,
+        owner: &TunnelOwner,
+    ) -> Result<()> {
+        if let Err(e) = ports.claim(port, name) {
+            self.release_name(name, owner);
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    async fn insert_tunnel(
+        &self,
+        name: String,
+        tunnel: RegisteredTunnel,
+        local_addr: String,
+        remote_addr: String,
+        owner: &TunnelOwner,
+        ports: Option<(&PortTable, u16)>,
+    ) -> Result<String> {
+        let ty = tunnel.tunnel_type();
+        let mut tm = self.tunnels.lock().await;
+        if let Err(tunnel) = tm.insert(name.clone(), tunnel, local_addr) {
+            drop(tm);
+            tunnel.close().await;
+            if let Some((table, port)) = ports {
+                table.release(port, &name);
+            }
+            self.release_name(&name, owner);
+            return Err(anyhow!("tunnel `{name}` already present in this session"));
+        }
+        self.note_tunnel_registered(&name, ty);
+        Ok(remote_addr)
+    }
+
     async fn register_tcp_tunnel(self: &Arc<Self>, np: &NewTunnel) -> Result<String> {
         if np.remote_port <= 0 || np.remote_port > 65535 {
             return Err(anyhow!("invalid remote_port"));
@@ -78,14 +127,8 @@ impl Control {
         let bind_addr = self.cfg.proxy_addr.clone();
         let remote_port = np.remote_port as u16;
         let name = np.tunnel_name.clone();
-        let owner = self.owner();
-
-        self.prepare_name_slot(&name).await;
-        self.tunnel_registry.try_insert(&name, owner.clone())?;
-        if let Err(e) = self.tcp_ports.claim(remote_port, &name) {
-            self.tunnel_registry.remove_if_owner(&name, &owner);
-            return Err(e);
-        }
+        let owner = self.claim_name(&name).await?;
+        self.claim_port(&self.tcp_ports, remote_port, &name, &owner)?;
 
         let tunnel = match TcpTunnel::start(
             name.clone(),
@@ -93,29 +136,29 @@ impl Control {
             remote_port,
             Arc::clone(self),
             limiter,
-            Arc::clone(&self.access),
         )
         .await
         {
             Ok(t) => t,
             Err(e) => {
                 self.tcp_ports.release(remote_port, &name);
-                self.tunnel_registry.remove_if_owner(&name, &owner);
+                self.release_name(&name, &owner);
                 return Err(e);
             }
         };
 
         let remote_addr = format!(":{remote_port}");
         let local_addr = format_local_addr(&np.local_ip, np.local_port);
-        let mut tm = self.tunnels.lock().await;
-        if let Err(tunnel) = tm.insert(name.clone(), RegisteredTunnel::Tcp(tunnel), local_addr) {
-            drop(tm);
-            tunnel.close().await;
-            self.tcp_ports.release(remote_port, &name);
-            self.tunnel_registry.remove_if_owner(&name, &owner);
-            return Err(anyhow!("tunnel `{name}` already present in this session"));
-        }
-        self.note_tunnel_registered(&name, "tcp");
+        let result = self
+            .insert_tunnel(
+                name,
+                RegisteredTunnel::Tcp(tunnel),
+                local_addr,
+                remote_addr,
+                &owner,
+                Some((&self.tcp_ports, remote_port)),
+            )
+            .await?;
         tracing::info!(
             tunnel = %np.tunnel_name,
             port = remote_port,
@@ -123,103 +166,7 @@ impl Control {
             generation = self.generation,
             "tcp tunnel registered"
         );
-        Ok(remote_addr)
-    }
-
-    async fn register_http_tunnel(self: &Arc<Self>, np: &NewTunnel) -> Result<String> {
-        let gw = self
-            .http_gw
-            .clone()
-            .ok_or_else(|| anyhow!("http tunnel requires server httpGwPort > 0"))?;
-
-        let limiter = Self::tunnel_transport(np)?;
-        let name = np.tunnel_name.clone();
-        let owner = self.owner();
-
-        self.prepare_name_slot(&name).await;
-        self.tunnel_registry.try_insert(&name, owner.clone())?;
-
-        let tunnel = match HttpTunnel::register(
-            np,
-            Arc::clone(self),
-            Arc::clone(&gw),
-            &self.cfg.root_domain,
-            limiter,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                self.tunnel_registry.remove_if_owner(&name, &owner);
-                return Err(e);
-            }
-        };
-
-        let remote_addr = tunnel
-            .domains
-            .iter()
-            .map(|d| format!("{d}:{}", gw.listen_port))
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let local_addr = format_local_addr(&np.local_ip, np.local_port);
-        let mut tm = self.tunnels.lock().await;
-        if let Err(tunnel) = tm.insert(name.clone(), RegisteredTunnel::Http(tunnel), local_addr) {
-            drop(tm);
-            tunnel.close().await;
-            self.tunnel_registry.remove_if_owner(&name, &owner);
-            return Err(anyhow!("tunnel `{name}` already present in this session"));
-        }
-        self.note_tunnel_registered(&name, "http");
-        Ok(remote_addr)
-    }
-
-    async fn register_https_tunnel(self: &Arc<Self>, np: &NewTunnel) -> Result<String> {
-        let gw = self
-            .https_gw
-            .clone()
-            .ok_or_else(|| anyhow!("https tunnel requires server httpsGwPort > 0"))?;
-
-        let limiter = Self::tunnel_transport(np)?;
-        let name = np.tunnel_name.clone();
-        let owner = self.owner();
-
-        self.prepare_name_slot(&name).await;
-        self.tunnel_registry.try_insert(&name, owner.clone())?;
-
-        let tunnel = match HttpsTunnel::register(
-            np,
-            Arc::clone(self),
-            Arc::clone(&gw),
-            &self.cfg.root_domain,
-            limiter,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                self.tunnel_registry.remove_if_owner(&name, &owner);
-                return Err(e);
-            }
-        };
-
-        let remote_addr = tunnel
-            .domains
-            .iter()
-            .map(|d| format!("{d}:{}", gw.listen_port))
-            .collect::<Vec<_>>()
-            .join(",");
-
-        let local_addr = format_local_addr(&np.local_ip, np.local_port);
-        let mut tm = self.tunnels.lock().await;
-        if let Err(tunnel) = tm.insert(name.clone(), RegisteredTunnel::Https(tunnel), local_addr) {
-            drop(tm);
-            tunnel.close().await;
-            self.tunnel_registry.remove_if_owner(&name, &owner);
-            return Err(anyhow!("tunnel `{name}` already present in this session"));
-        }
-        self.note_tunnel_registered(&name, "https");
-        Ok(remote_addr)
+        Ok(result)
     }
 
     async fn register_udp_tunnel(self: &Arc<Self>, np: &NewTunnel) -> Result<String> {
@@ -231,15 +178,9 @@ impl Control {
         let bind_addr = self.cfg.proxy_addr.clone();
         let remote_port = np.remote_port as u16;
         let name = np.tunnel_name.clone();
-        let owner = self.owner();
         let packet_size = self.cfg.udp_packet_size.max(512);
-
-        self.prepare_name_slot(&name).await;
-        self.tunnel_registry.try_insert(&name, owner.clone())?;
-        if let Err(e) = self.udp_ports.claim(remote_port, &name) {
-            self.tunnel_registry.remove_if_owner(&name, &owner);
-            return Err(e);
-        }
+        let owner = self.claim_name(&name).await?;
+        self.claim_port(&self.udp_ports, remote_port, &name, &owner)?;
 
         let tunnel = match UdpTunnel::start(
             name.clone(),
@@ -254,22 +195,23 @@ impl Control {
             Ok(t) => t,
             Err(e) => {
                 self.udp_ports.release(remote_port, &name);
-                self.tunnel_registry.remove_if_owner(&name, &owner);
+                self.release_name(&name, &owner);
                 return Err(e);
             }
         };
 
         let remote_addr = format!(":{remote_port}");
         let local_addr = format_local_addr(&np.local_ip, np.local_port);
-        let mut tm = self.tunnels.lock().await;
-        if let Err(tunnel) = tm.insert(name.clone(), RegisteredTunnel::Udp(tunnel), local_addr) {
-            drop(tm);
-            tunnel.close().await;
-            self.udp_ports.release(remote_port, &name);
-            self.tunnel_registry.remove_if_owner(&name, &owner);
-            return Err(anyhow!("tunnel `{name}` already present in this session"));
-        }
-        self.note_tunnel_registered(&name, "udp");
+        let result = self
+            .insert_tunnel(
+                name,
+                RegisteredTunnel::Udp(tunnel),
+                local_addr,
+                remote_addr,
+                &owner,
+                Some((&self.udp_ports, remote_port)),
+            )
+            .await?;
         tracing::info!(
             tunnel = %np.tunnel_name,
             port = remote_port,
@@ -277,7 +219,95 @@ impl Control {
             generation = self.generation,
             "udp tunnel registered"
         );
-        Ok(remote_addr)
+        Ok(result)
+    }
+
+    async fn register_http_tunnel(self: &Arc<Self>, np: &NewTunnel) -> Result<String> {
+        let gw = self
+            .http_gw
+            .clone()
+            .ok_or_else(|| anyhow!("http tunnel requires server httpGwPort > 0"))?;
+
+        let limiter = Self::tunnel_transport(np)?;
+        let name = np.tunnel_name.clone();
+        let owner = self.claim_name(&name).await?;
+
+        let tunnel = match HttpTunnel::register(
+            np,
+            Arc::clone(self),
+            Arc::clone(&gw),
+            &self.cfg.root_domain,
+            limiter,
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                self.release_name(&name, &owner);
+                return Err(e);
+            }
+        };
+
+        let remote_addr = tunnel
+            .domains
+            .iter()
+            .map(|d| format!("{d}:{}", gw.listen_port))
+            .collect::<Vec<_>>()
+            .join(",");
+        let local_addr = format_local_addr(&np.local_ip, np.local_port);
+        self.insert_tunnel(
+            name,
+            RegisteredTunnel::Http(tunnel),
+            local_addr,
+            remote_addr,
+            &owner,
+            None,
+        )
+        .await
+    }
+
+    async fn register_https_tunnel(self: &Arc<Self>, np: &NewTunnel) -> Result<String> {
+        let gw = self
+            .https_gw
+            .clone()
+            .ok_or_else(|| anyhow!("https tunnel requires server httpsGwPort > 0"))?;
+
+        let limiter = Self::tunnel_transport(np)?;
+        let name = np.tunnel_name.clone();
+        let owner = self.claim_name(&name).await?;
+
+        let tunnel = match HttpsTunnel::register(
+            np,
+            Arc::clone(self),
+            Arc::clone(&gw),
+            &self.cfg.root_domain,
+            limiter,
+        )
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                self.release_name(&name, &owner);
+                return Err(e);
+            }
+        };
+
+        let remote_addr = tunnel
+            .domains
+            .iter()
+            .map(|d| format!("{d}:{}", gw.listen_port))
+            .collect::<Vec<_>>()
+            .join(",");
+        let local_addr = format_local_addr(&np.local_ip, np.local_port);
+        self.insert_tunnel(
+            name,
+            RegisteredTunnel::Https(tunnel),
+            local_addr,
+            remote_addr,
+            &owner,
+            None,
+        )
+        .await
     }
 
     pub(super) async fn handle_close_tunnel(&self, cp: CloseTunnel) -> Result<()> {

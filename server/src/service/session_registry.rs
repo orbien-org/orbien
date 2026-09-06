@@ -5,7 +5,6 @@ use super::agent_registry::{
 use super::session_table::{self, remove_if_current, swap_in_locked};
 use super::Service;
 use crate::control::Control;
-use crate::metrics::ServerMetrics;
 use anyhow::{anyhow, Result};
 use orbien_core::auth;
 use orbien_core::msg::{self, Login, LoginResp, Message, NewDataConn};
@@ -74,7 +73,6 @@ impl Service {
             pool_count,
             self.http_gw.clone(),
             self.https_gw.clone(),
-            Arc::clone(&self.access),
             user.clone(),
             agent_id.clone(),
             login.hostname.clone(),

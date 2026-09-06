@@ -1,6 +1,8 @@
+use crate::control::Control;
 use crate::dashboard::model::{ClientInfo, TunnelInfo};
 use crate::service::Service;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 pub struct DashboardSnapshot {
     pub clients: Vec<ClientInfo>,
@@ -14,15 +16,21 @@ pub struct DashboardSnapshot {
 
 impl Service {
     pub async fn dashboard_snapshot(&self) -> DashboardSnapshot {
-        let controls = self.controls.lock().await;
+        let online: Vec<Arc<Control>> = {
+            let controls = self.controls.lock().await;
+            controls
+                .values()
+                .map(|entry| Arc::clone(&entry.control))
+                .collect()
+        };
         let agents = self.agents.list();
-        let mut clients = Vec::with_capacity(controls.len() + agents.len());
+
+        let mut clients = Vec::with_capacity(online.len() + agents.len());
         let mut tunnels = Vec::new();
         let mut tunnel_type_count: BTreeMap<String, usize> = BTreeMap::new();
         let mut online_ids = std::collections::HashSet::new();
 
-        for (_, entry) in controls.iter() {
-            let ctrl = &entry.control;
+        for ctrl in &online {
             let tunnel_count = ctrl.tunnel_count().await;
             online_ids.insert(ctrl.session_id.clone());
             let mut active_connections = 0usize;

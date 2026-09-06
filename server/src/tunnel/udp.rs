@@ -1,5 +1,5 @@
 use crate::control::Control;
-use crate::metrics::{MemMetrics, ServerMetrics};
+use crate::metrics::MemMetrics;
 use anyhow::Result;
 use orbien_core::limit::{maybe_limit, BandwidthLimiter};
 use orbien_core::msg::{self, Message, UdpPacket};

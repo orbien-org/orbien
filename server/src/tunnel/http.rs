@@ -1,9 +1,8 @@
 use super::gw::{
     build_domains, expand_locations, normalize_host, route_basic_auth_ok, HttpGw, HttpRoute,
 };
-use crate::access::{prepare_ingress, AccessPolicy};
+use crate::access::prepare_ingress;
 use crate::control::Control;
-use crate::metrics::ServerMetrics;
 use anyhow::{anyhow, bail, Result};
 use httparse::Status;
 use orbien_core::limit::{maybe_limit, BandwidthLimiter};
@@ -36,26 +35,23 @@ impl HttpTunnel {
         let basic_auth_user = np.basic_auth_user.clone();
         let basic_auth_password = np.basic_auth_password.clone();
 
-        gw.unregister_tunnel(&name).await;
+        gw.unregister_tunnel(&name);
 
         for domain in &domains {
             for location in &locations {
-                if let Err(e) = gw
-                    .register(
-                        domain,
-                        HttpRoute {
-                            tunnel_name: name.clone(),
-                            control: Arc::downgrade(&control),
-                            location: location.clone(),
-                            host_header_rewrite: rewrite.clone(),
-                            basic_auth_user: basic_auth_user.clone(),
-                            basic_auth_password: basic_auth_password.clone(),
-                            limiter: limiter.clone(),
-                        },
-                    )
-                    .await
-                {
-                    gw.unregister_tunnel(&name).await;
+                if let Err(e) = gw.register(
+                    domain,
+                    HttpRoute {
+                        tunnel_name: name.clone(),
+                        control: Arc::downgrade(&control),
+                        location: location.clone(),
+                        host_header_rewrite: rewrite.clone(),
+                        basic_auth_user: basic_auth_user.clone(),
+                        basic_auth_password: basic_auth_password.clone(),
+                        limiter: limiter.clone(),
+                    },
+                ) {
+                    gw.unregister_tunnel(&name);
                     return Err(e);
                 }
             }
@@ -78,13 +74,23 @@ impl HttpTunnel {
     }
 
     pub async fn close(&self) {
+        self.shutdown();
+    }
+
+    fn shutdown(&self) {
         if self
             .closed
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
-            self.gw.unregister_tunnel(&self.name).await;
+            self.gw.unregister_tunnel(&self.name);
         }
+    }
+}
+
+impl Drop for HttpTunnel {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -92,7 +98,6 @@ pub async fn run_http_gw_listener(
     bind_addr: String,
     port: u16,
     gw: Arc<HttpGw>,
-    access: Arc<AccessPolicy>,
     shutdown: Arc<Notify>,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
@@ -107,9 +112,8 @@ pub async fn run_http_gw_listener(
                     Ok((stream, peer)) => {
                         orbien_core::net::enable_nodelay(&stream);
                         let gw = Arc::clone(&gw);
-                        let access = Arc::clone(&access);
                         tokio::spawn(async move {
-                            if let Err(e) = handle_http_ingress(gw, stream, peer, access).await {
+                            if let Err(e) = handle_http_ingress(gw, stream, peer).await {
                                 tracing::debug!(%peer, error = %e, "http ingress ended");
                             }
                         });
@@ -138,12 +142,11 @@ async fn handle_http_ingress(
     gw: Arc<HttpGw>,
     stream: TcpStream,
     peer: std::net::SocketAddr,
-    access: Arc<AccessPolicy>,
 ) -> Result<()> {
-    let mut ingress = prepare_ingress(stream, peer, &access).await?;
+    let mut ingress = prepare_ingress(stream, peer);
     let head = read_http_request_head(&mut ingress.stream).await?;
 
-    let Some(route) = gw.lookup(&head.host, &head.path).await else {
+    let Some(route) = gw.lookup(&head.host, &head.path) else {
         tracing::debug!(
             peer = %ingress.peer,
             source = %ingress.source,

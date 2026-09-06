@@ -1,8 +1,7 @@
 mod data_pool;
 mod register;
 
-use crate::access::AccessPolicy;
-use crate::metrics::{MemMetrics, ServerMetrics};
+use crate::metrics::MemMetrics;
 use crate::tunnel::{
     DetachedTunnel, HttpGw, HttpsGw, PortTable, TunnelManager, TunnelOwner, TunnelRegistry,
 };
@@ -52,7 +51,6 @@ pub struct Control {
     pool_count: usize,
     http_gw: Option<Arc<HttpGw>>,
     https_gw: Option<Arc<HttpsGw>>,
-    access: Arc<AccessPolicy>,
     pub metrics: Arc<MemMetrics>,
     last_ping_unix: AtomicI64,
 }
@@ -66,7 +64,6 @@ impl Control {
         pool_count: usize,
         http_gw: Option<Arc<HttpGw>>,
         https_gw: Option<Arc<HttpsGw>>,
-        access: Arc<AccessPolicy>,
         user: String,
         agent_id: String,
         hostname: String,
@@ -112,7 +109,6 @@ impl Control {
             pool_count: pool_count.max(1),
             http_gw,
             https_gw,
-            access,
             metrics,
             last_ping_unix: AtomicI64::new(
                 SystemTime::now()
