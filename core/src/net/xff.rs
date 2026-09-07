@@ -13,9 +13,14 @@ pub fn apply_x_forwarded_for(head: &mut Vec<u8>, client_ip: &str, proto: &str) -
         "\n"
     };
 
+    let blank_idx = lines
+        .iter()
+        .position(|l| l == "\r\n" || l == "\n")
+        .unwrap_or(lines.len());
+
     let mut xff_idx: Option<usize> = None;
     let mut has_proto = false;
-    for (i, line) in lines.iter().enumerate().skip(1) {
+    for (i, line) in lines.iter().enumerate().take(blank_idx).skip(1) {
         let trimmed = line.trim_start_matches([' ', '\t']);
         let lower_ok_xff = trimmed.len() >= 16
             && trimmed.as_bytes()[..15].eq_ignore_ascii_case(b"x-forwarded-for")
@@ -46,10 +51,6 @@ pub fn apply_x_forwarded_for(head: &mut Vec<u8>, client_ip: &str, proto: &str) -
             };
             lines[i] = format!("X-Forwarded-For: {new_val}{ending}");
         } else {
-            let blank_idx = lines
-                .iter()
-                .position(|l| l == "\r\n" || l == "\n")
-                .unwrap_or(lines.len());
             lines.insert(blank_idx, format!("X-Forwarded-For: {client_ip}{ending}"));
         }
     }

@@ -131,6 +131,7 @@ pub async fn run_http_gw_listener(
 
 struct ParsedHttpHead {
     raw: Vec<u8>,
+    body_prefix: Vec<u8>,
     host: String,
     path: String,
     is_proxy_request: bool,
@@ -212,8 +213,11 @@ async fn handle_http_ingress(
         .await?;
 
     let mut data = maybe_limit(data, route.limiter.clone());
-    let head_len = raw.len() as u64;
+    let preamble_len = (raw.len() + head.body_prefix.len()) as u64;
     data.write_all(&raw).await?;
+    if !head.body_prefix.is_empty() {
+        data.write_all(&head.body_prefix).await?;
+    }
     tracing::debug!(
         tunnel = %route.tunnel_name,
         host = %head.host,
@@ -224,9 +228,11 @@ async fn handle_http_ingress(
     );
     let _guard = control.metrics.track_connection(&route.tunnel_name, "http");
     let (to_data, from_data, err) = orbien_core::io::join_counted(ingress.stream, data).await;
-    control
-        .metrics
-        .add_traffic_in(&route.tunnel_name, "http", to_data.saturating_add(head_len));
+    control.metrics.add_traffic_in(
+        &route.tunnel_name,
+        "http",
+        to_data.saturating_add(preamble_len),
+    );
     control
         .metrics
         .add_traffic_out(&route.tunnel_name, "http", from_data);
@@ -252,7 +258,10 @@ async fn read_http_request_head<R: AsyncRead + Unpin>(stream: &mut R) -> Result<
         let mut headers = [httparse::EMPTY_HEADER; 64];
         let mut req = httparse::Request::new(&mut headers);
         match req.parse(&buf)? {
-            Status::Complete(_) => {
+            Status::Complete(header_len) => {
+                if header_len > buf.len() {
+                    bail!("httparse header length exceeds buffer");
+                }
                 let method = req.method.unwrap_or("").to_string();
                 let target = req.path.unwrap_or("/").to_string();
                 let (is_proxy_request, path) = classify_request_target(&method, &target);
@@ -268,8 +277,10 @@ async fn read_http_request_head<R: AsyncRead + Unpin>(stream: &mut R) -> Result<
                 let authorization = header_value(&req, "authorization");
                 let proxy_authorization = header_value(&req, "proxy-authorization");
 
+                let body_prefix = buf.split_off(header_len);
                 return Ok(ParsedHttpHead {
                     raw: buf,
+                    body_prefix,
                     host: normalize_host(&host),
                     path,
                     is_proxy_request,
@@ -327,7 +338,17 @@ fn rewrite_host_header(buf: &mut Vec<u8>, new_host: &str) -> Result<()> {
     let text = String::from_utf8_lossy(buf);
     let mut out = String::new();
     let mut replaced = false;
+    let mut in_headers = true;
     for line in text.split_inclusive('\n') {
+        if !in_headers {
+            out.push_str(line);
+            continue;
+        }
+        if line == "\r\n" || line == "\n" {
+            out.push_str(line);
+            in_headers = false;
+            continue;
+        }
         let trimmed_start = line.trim_start_matches([' ', '\t']);
         if !replaced
             && trimmed_start.len() >= 5

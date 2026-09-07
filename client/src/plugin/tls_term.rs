@@ -63,11 +63,14 @@ impl Plugin for TlsTermPlugin {
         orbien_core::net::enable_nodelay(&local);
 
         let (mut tls_r, mut tls_w) = tokio::io::split(tls);
-        let mut head = read_http_request_head(&mut tls_r).await?;
-        apply_host_rewrite(&mut head, &self.host_header_rewrite)?;
+        let (mut headers, body_prefix) = read_http_request_head(&mut tls_r).await?;
+        apply_host_rewrite(&mut headers, &self.host_header_rewrite)?;
+        orbien_core::net::apply_x_forwarded_for(&mut headers, &conn.src_addr, "https")?;
 
-        orbien_core::net::apply_x_forwarded_for(&mut head, &conn.src_addr, "https")?;
-        local.write_all(&head).await?;
+        local.write_all(&headers).await?;
+        if !body_prefix.is_empty() {
+            local.write_all(&body_prefix).await?;
+        }
 
         tracing::debug!(
             local = %self.local_addr,
@@ -84,7 +87,9 @@ impl Plugin for TlsTermPlugin {
     }
 }
 
-async fn read_http_request_head<R: AsyncReadExt + Unpin>(stream: &mut R) -> Result<Vec<u8>> {
+async fn read_http_request_head<R: AsyncReadExt + Unpin>(
+    stream: &mut R,
+) -> Result<(Vec<u8>, Vec<u8>)> {
     let mut buf = Vec::with_capacity(4096);
     let mut tmp = [0u8; 2048];
     loop {
@@ -99,10 +104,23 @@ async fn read_http_request_head<R: AsyncReadExt + Unpin>(stream: &mut R) -> Resu
         let mut headers = [httparse::EMPTY_HEADER; 64];
         let mut req = httparse::Request::new(&mut headers);
         match req.parse(&buf)? {
-            Status::Complete(_) => return Ok(buf),
+            Status::Complete(header_len) => {
+                if header_len > buf.len() {
+                    bail!("httparse header length exceeds buffer");
+                }
+                let body_prefix = buf.split_off(header_len);
+                return Ok((buf, body_prefix));
+            }
             Status::Partial => continue,
         }
     }
+}
+
+fn header_block_end(lines: &[String]) -> usize {
+    lines
+        .iter()
+        .position(|l| l == "\r\n" || l == "\n")
+        .unwrap_or(lines.len())
 }
 
 fn apply_host_rewrite(buf: &mut Vec<u8>, host_rewrite: &str) -> Result<()> {
@@ -122,8 +140,9 @@ fn apply_host_rewrite(buf: &mut Vec<u8>, host_rewrite: &str) -> Result<()> {
         "\n"
     };
 
+    let blank_idx = header_block_end(&lines);
     let mut replaced = false;
-    for line in lines.iter_mut().skip(1) {
+    for line in lines.iter_mut().take(blank_idx).skip(1) {
         let trimmed = line.trim_start_matches([' ', '\t']);
         if trimmed.len() >= 5 && trimmed.as_bytes()[..5].eq_ignore_ascii_case(b"host:") {
             *line = format!("Host: {host_rewrite}{ending}");
@@ -132,7 +151,7 @@ fn apply_host_rewrite(buf: &mut Vec<u8>, host_rewrite: &str) -> Result<()> {
         }
     }
     if !replaced {
-        lines.insert(1, format!("Host: {host_rewrite}{ending}"));
+        lines.insert(blank_idx, format!("Host: {host_rewrite}{ending}"));
     }
 
     *buf = lines.join("").into_bytes();
