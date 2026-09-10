@@ -1,4 +1,4 @@
-use crate::access::{prepare_ingress, AccessPolicy};
+use crate::access::prepare_ingress;
 use crate::control::Control;
 use crate::metrics;
 use anyhow::Result;
@@ -24,7 +24,6 @@ impl TcpTunnel {
         remote_port: u16,
         control: Arc<Control>,
         limiter: Option<Arc<BandwidthLimiter>>,
-        access: Arc<AccessPolicy>,
     ) -> Result<Self> {
         let addr = format!("{bind_addr}:{remote_port}");
         let listener = TcpListener::bind(&addr).await?;
@@ -55,17 +54,8 @@ impl TcpTunnel {
                                 };
                                 let pname = tunnel_name.clone();
                                 let lim = limiter_spawn.clone();
-                                let access = Arc::clone(&access);
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_ingress(
-                                        ctl,
-                                        &pname,
-                                        stream,
-                                        peer,
-                                        lim,
-                                        access,
-                                    )
-                                    .await
+                                    if let Err(e) = handle_ingress(ctl, &pname, stream, peer, lim).await
                                     {
                                         tracing::debug!(tunnel = %pname, error = %e, "ingress ended");
                                     }
@@ -117,9 +107,8 @@ async fn handle_ingress(
     stream: tokio::net::TcpStream,
     peer: std::net::SocketAddr,
     limiter: Option<Arc<BandwidthLimiter>>,
-    access: Arc<AccessPolicy>,
 ) -> Result<()> {
-    let ingress = prepare_ingress(stream, peer, &access).await?;
+    let ingress = prepare_ingress(stream, peer);
     let data = control.get_data_conn().await?;
     let data = control
         .start_data_conn(

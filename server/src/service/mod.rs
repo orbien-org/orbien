@@ -3,7 +3,6 @@ mod ingress;
 mod session_registry;
 mod session_table;
 
-use crate::access::AccessPolicy;
 use crate::metrics::MemMetrics;
 use crate::tunnel::{
     run_http_gw_listener, run_https_gw_listener, HttpGw, HttpsGw, PortTable, TunnelRegistry,
@@ -23,7 +22,6 @@ use tokio::task::JoinSet;
 
 pub struct Service {
     cfg: ServerConfig,
-    access: Arc<AccessPolicy>,
     pub(crate) controls: Arc<Mutex<SessionMap>>,
     pub(crate) agents: Arc<AgentRegistry>,
     http_gw: Option<Arc<HttpGw>>,
@@ -38,7 +36,6 @@ pub struct Service {
 
 impl Service {
     pub fn new(cfg: ServerConfig) -> Result<Self> {
-        let access = Arc::new(AccessPolicy::from_server_config(&cfg)?);
         let http_gw = if cfg.http_gw_enabled() {
             Some(Arc::new(HttpGw::new(cfg.http_gw_port)))
         } else {
@@ -57,7 +54,6 @@ impl Service {
         }
         Ok(Self {
             cfg,
-            access,
             controls: Arc::new(Mutex::new(HashMap::new())),
             agents: Arc::new(AgentRegistry::new()),
             http_gw,
@@ -78,7 +74,7 @@ impl Service {
         let tcp_listener = TcpListener::bind(&tcp_addr).await?;
         tracing::info!(
             %tcp_addr,
-            ws_path = transport::ORBIEN_WEBSOCKET_PATH,
+            ws_path = %this.cfg.transport.ws_path,
             tcp_mux = this.cfg.transport.tcp_mux,
             "tcp/websocket control/data listener ready"
         );
@@ -94,18 +90,16 @@ impl Service {
             let bind = this.cfg.proxy_addr.clone();
             let port = this.cfg.http_gw_port;
             let gw = Arc::clone(gw);
-            let access = Arc::clone(&this.access);
             let shutdown = Arc::clone(&gw_shutdown);
-            set.spawn(async move { run_http_gw_listener(bind, port, gw, access, shutdown).await });
+            set.spawn(async move { run_http_gw_listener(bind, port, gw, shutdown).await });
         }
 
         if let Some(ref gw) = this.https_gw {
             let bind = this.cfg.proxy_addr.clone();
             let port = this.cfg.https_gw_port;
             let gw = Arc::clone(gw);
-            let access = Arc::clone(&this.access);
             let shutdown = Arc::clone(&gw_shutdown);
-            set.spawn(async move { run_https_gw_listener(bind, port, gw, access, shutdown).await });
+            set.spawn(async move { run_https_gw_listener(bind, port, gw, shutdown).await });
         }
 
         if this.cfg.quic_enabled() {

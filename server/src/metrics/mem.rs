@@ -1,7 +1,6 @@
 use super::counter::Counter;
 use super::date_counter::DateCounter;
 use super::hour_counter::HourCounter;
-use super::traits::ServerMetrics;
 use super::{RESERVE_DAYS, RESERVE_HOURS};
 use chrono::{Duration, Local, NaiveDate, Timelike};
 use std::collections::{HashMap, HashSet};
@@ -126,7 +125,7 @@ impl MemMetrics {
     }
 
     pub fn server_snapshot(&self) -> ServerSnapshot {
-        let g = self.state.lock().expect("metrics lock");
+        let mut g = self.state.lock().expect("metrics lock");
         let mut tunnel_type_counts = HashMap::new();
         for (k, v) in &g.tunnel_type_counts {
             let n = v.count().max(0) as usize;
@@ -145,8 +144,8 @@ impl MemMetrics {
     }
 
     pub fn tunnel_snapshot(&self, name: &str) -> Option<TunnelSnapshot> {
-        let g = self.state.lock().expect("metrics lock");
-        g.tunnels.get(name).map(|p| to_tunnel_snapshot(name, p))
+        let mut g = self.state.lock().expect("metrics lock");
+        g.tunnels.get_mut(name).map(|p| to_tunnel_snapshot(name, p))
     }
 
     pub fn tunnel_traffic(
@@ -154,8 +153,8 @@ impl MemMetrics {
         name: &str,
         window: TrafficWindow,
     ) -> Option<TunnelTrafficHistory> {
-        let g = self.state.lock().expect("metrics lock");
-        let p = g.tunnels.get(name)?;
+        let mut g = self.state.lock().expect("metrics lock");
+        let p = g.tunnels.get_mut(name)?;
         Some(match window {
             TrafficWindow::Days7 => {
                 let inbound = p.traffic_in.last_days(RESERVE_DAYS);
@@ -171,7 +170,7 @@ impl MemMetrics {
     }
 
     pub fn server_traffic(&self, window: TrafficWindow) -> TunnelTrafficHistory {
-        let g = self.state.lock().expect("metrics lock");
+        let mut g = self.state.lock().expect("metrics lock");
         match window {
             TrafficWindow::Days7 => {
                 let inbound = g.total_traffic_in.last_days(RESERVE_DAYS);
@@ -200,22 +199,8 @@ impl MemMetrics {
             tunnel_type,
         }
     }
-}
 
-pub struct ConnGuard {
-    metrics: Arc<MemMetrics>,
-    name: String,
-    tunnel_type: String,
-}
-
-impl Drop for ConnGuard {
-    fn drop(&mut self) {
-        self.metrics.close_connection(&self.name, &self.tunnel_type);
-    }
-}
-
-impl ServerMetrics for MemMetrics {
-    fn new_client(&self, session_id: &str) {
+    pub fn new_client(&self, session_id: &str) {
         let mut g = self.state.lock().expect("metrics lock");
         if !session_id.is_empty() {
             g.seen_clients.insert(session_id.to_string());
@@ -232,7 +217,7 @@ impl ServerMetrics for MemMetrics {
         g.client_counts.inc(1);
     }
 
-    fn close_client(&self) {
+    pub fn close_client(&self) {
         self.state
             .lock()
             .expect("metrics lock")
@@ -240,7 +225,7 @@ impl ServerMetrics for MemMetrics {
             .dec(1);
     }
 
-    fn new_tunnel(&self, name: &str, tunnel_type: &str, user: &str, session_id: &str) {
+    pub fn new_tunnel(&self, name: &str, tunnel_type: &str, user: &str, session_id: &str) {
         let mut g = self.state.lock().expect("metrics lock");
         g.tunnel_type_counts
             .entry(tunnel_type.to_string())
@@ -262,7 +247,7 @@ impl ServerMetrics for MemMetrics {
         entry.last_start_unix = Some(now_unix);
     }
 
-    fn close_tunnel(&self, name: &str, tunnel_type: &str) {
+    pub fn close_tunnel(&self, name: &str, tunnel_type: &str) {
         let mut g = self.state.lock().expect("metrics lock");
         if let Some(counter) = g.tunnel_type_counts.get(tunnel_type) {
             counter.dec(1);
@@ -272,7 +257,7 @@ impl ServerMetrics for MemMetrics {
         }
     }
 
-    fn open_connection(&self, name: &str, _tunnel_type: &str) {
+    pub fn open_connection(&self, name: &str, _tunnel_type: &str) {
         let mut g = self.state.lock().expect("metrics lock");
         g.active_connections.inc(1);
         if let Some(p) = g.tunnels.get_mut(name) {
@@ -280,7 +265,7 @@ impl ServerMetrics for MemMetrics {
         }
     }
 
-    fn close_connection(&self, name: &str, _tunnel_type: &str) {
+    pub fn close_connection(&self, name: &str, _tunnel_type: &str) {
         let mut g = self.state.lock().expect("metrics lock");
         g.active_connections.dec(1);
         if let Some(p) = g.tunnels.get_mut(name) {
@@ -288,7 +273,7 @@ impl ServerMetrics for MemMetrics {
         }
     }
 
-    fn add_traffic_in(&self, name: &str, _tunnel_type: &str, bytes: u64) {
+    pub fn add_traffic_in(&self, name: &str, _tunnel_type: &str, bytes: u64) {
         if bytes == 0 {
             return;
         }
@@ -302,7 +287,7 @@ impl ServerMetrics for MemMetrics {
         }
     }
 
-    fn add_traffic_out(&self, name: &str, _tunnel_type: &str, bytes: u64) {
+    pub fn add_traffic_out(&self, name: &str, _tunnel_type: &str, bytes: u64) {
         if bytes == 0 {
             return;
         }
@@ -317,7 +302,19 @@ impl ServerMetrics for MemMetrics {
     }
 }
 
-fn to_tunnel_snapshot(name: &str, p: &TunnelStats) -> TunnelSnapshot {
+pub struct ConnGuard {
+    metrics: Arc<MemMetrics>,
+    name: String,
+    tunnel_type: String,
+}
+
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.metrics.close_connection(&self.name, &self.tunnel_type);
+    }
+}
+
+fn to_tunnel_snapshot(name: &str, p: &mut TunnelStats) -> TunnelSnapshot {
     TunnelSnapshot {
         name: name.to_string(),
         tunnel_type: p.tunnel_type.clone(),

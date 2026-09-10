@@ -135,6 +135,7 @@ export component AppWindow inherits Window {
     in-out property <string> user: "";
     in-out property <int> protocol-index: 0;
     in-out property <string> pool-count: "1";
+    in-out property <string> ws-path: "";
     in-out property <bool> tcp-mux: true;
     in-out property <bool> tls-enable: true;
     in-out property <bool> config-show-advanced: false;
@@ -286,6 +287,7 @@ export component AppWindow inherits Window {
                 user <=> root.user;
                 protocol-index <=> root.protocol-index;
                 pool-count <=> root.pool-count;
+                ws-path <=> root.ws-path;
                 tcp-mux <=> root.tcp-mux;
                 tls-enable <=> root.tls-enable;
                 show-advanced <=> root.config-show-advanced;

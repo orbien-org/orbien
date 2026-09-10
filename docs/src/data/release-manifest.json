@@ -1,0 +1,32 @@
+{
+  "version": "3.5.0",
+  "fetchedAt": "2026-09-04T04:08:31.758Z",
+  "assets": {
+    "orbien-desktop_3.5.0_darwin_amd64.dmg": 13145444,
+    "orbien-desktop_3.5.0_darwin_arm64.dmg": 12342275,
+    "orbien-desktop_3.5.0_linux_amd64.deb": 10948866,
+    "orbien-desktop_3.5.0_linux_arm64.deb": 10623360,
+    "orbien-desktop_3.5.0_windows_amd64.exe": 20629504,
+    "orbien-desktop_3.5.0_windows_amd64.zip": 10765826,
+    "orbien-desktop_3.5.0_windows_arm64.exe": 18804224,
+    "orbien-desktop_3.5.0_windows_arm64.zip": 10391199,
+    "orbien-server_3.5.0_darwin_amd64.tar.gz": 2712191,
+    "orbien-server_3.5.0_darwin_arm64.tar.gz": 2496450,
+    "orbien-server_3.5.0_freebsd_amd64.tar.gz": 2822466,
+    "orbien-server_3.5.0_linux_amd64_gnu.tar.gz": 2861875,
+    "orbien-server_3.5.0_linux_amd64_musl.tar.gz": 2256249,
+    "orbien-server_3.5.0_linux_arm64_gnu.tar.gz": 2700983,
+    "orbien-server_3.5.0_linux_arm64_musl.tar.gz": 1984982,
+    "orbien-server_3.5.0_windows_amd64.tar.gz": 2631475,
+    "orbien-server_3.5.0_windows_arm64.tar.gz": 2487522,
+    "orbien_3.5.0_darwin_amd64.tar.gz": 2344833,
+    "orbien_3.5.0_darwin_arm64.tar.gz": 2118719,
+    "orbien_3.5.0_freebsd_amd64.tar.gz": 2451180,
+    "orbien_3.5.0_linux_amd64_gnu.tar.gz": 2486471,
+    "orbien_3.5.0_linux_amd64_musl.tar.gz": 1898869,
+    "orbien_3.5.0_linux_arm64_gnu.tar.gz": 2324714,
+    "orbien_3.5.0_linux_arm64_musl.tar.gz": 1631696,
+    "orbien_3.5.0_windows_amd64.tar.gz": 2274025,
+    "orbien_3.5.0_windows_arm64.tar.gz": 2129880
+  }
+}

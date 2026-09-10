@@ -76,6 +76,9 @@ pub struct TransportConfig {
     #[serde(default)]
     pub quic: QuicOptions,
 
+    #[serde(default = "default_ws_path", rename = "wsPath", alias = "ws_path")]
+    pub ws_path: String,
+
     #[serde(default)]
     pub tls: ClientTlsConfig,
 }
@@ -90,6 +93,7 @@ impl Default for TransportConfig {
             heartbeat_interval: default_heartbeat_interval(),
             heartbeat_timeout: default_heartbeat_timeout(),
             quic: QuicOptions::default(),
+            ws_path: default_ws_path(),
             tls: ClientTlsConfig::default(),
         }
     }
@@ -217,6 +221,10 @@ fn default_pool_count() -> i32 {
 
 fn default_tcp_mux() -> bool {
     true
+}
+
+fn default_ws_path() -> String {
+    crate::transport::ORBIEN_WEBSOCKET_PATH.to_string()
 }
 
 fn default_mux_keepalive_secs() -> i64 {
@@ -356,6 +364,8 @@ impl ClientConfig {
                 self.transport.tls.server_name = host;
             }
         }
+
+        self.transport.ws_path = crate::transport::normalize_ws_path(&self.transport.ws_path);
     }
 
     pub fn validate(&self) -> anyhow::Result<()> {

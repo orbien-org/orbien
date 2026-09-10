@@ -14,7 +14,7 @@ pub use tls::{
     new_server_tls_config, server_crypto, server_crypto_from_tls_files, ALPN_ORBIEN,
 };
 pub use websocket::{
-    accept_websocket, dial_websocket, is_websocket_http_request, WsByteStream,
+    accept_websocket, dial_websocket, is_websocket_http_request, normalize_ws_path, WsByteStream,
     ORBIEN_WEBSOCKET_PATH,
 };
 pub use yamux_mux::{serve_yamux_session, YamuxClient};

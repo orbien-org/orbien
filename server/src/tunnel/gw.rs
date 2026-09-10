@@ -1,7 +1,6 @@
 use crate::control::Control;
 use std::collections::HashMap;
-use std::sync::Weak;
-use tokio::sync::Mutex;
+use std::sync::{Mutex, Weak};
 
 #[derive(Clone)]
 pub struct HttpRoute {
@@ -29,12 +28,12 @@ impl HttpGw {
         }
     }
 
-    pub async fn register(&self, domain: &str, route: HttpRoute) -> anyhow::Result<()> {
+    pub fn register(&self, domain: &str, route: HttpRoute) -> anyhow::Result<()> {
         let key = normalize_host(domain);
         if key.is_empty() {
             return Err(anyhow::anyhow!("empty http domain"));
         }
-        let mut map = self.routes.lock().await;
+        let mut map = self.routes.lock().unwrap_or_else(|e| e.into_inner());
         let list = map.entry(key.clone()).or_default();
 
         if let Some(existing) = list.iter().find(|r| r.location == route.location) {
@@ -53,17 +52,17 @@ impl HttpGw {
         Ok(())
     }
 
-    pub async fn unregister_tunnel(&self, tunnel_name: &str) {
-        let mut map = self.routes.lock().await;
+    pub fn unregister_tunnel(&self, tunnel_name: &str) {
+        let mut map = self.routes.lock().unwrap_or_else(|e| e.into_inner());
         map.retain(|_, list| {
             list.retain(|r| r.tunnel_name != tunnel_name);
             !list.is_empty()
         });
     }
 
-    pub async fn lookup(&self, host: &str, path: &str) -> Option<HttpRoute> {
+    pub fn lookup(&self, host: &str, path: &str) -> Option<HttpRoute> {
         let key = normalize_host(host);
-        let map = self.routes.lock().await;
+        let map = self.routes.lock().unwrap_or_else(|e| e.into_inner());
         match_location(&map, &key, path).cloned()
     }
 }

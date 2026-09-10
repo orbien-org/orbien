@@ -13,6 +13,7 @@ tcpMux = true
 muxKeepaliveSecs = 30
 heartbeatInterval = 30
 heartbeatTimeout = 90
+wsPath = "/ws"
 
 [transport.quic]
 keepalivePeriod = 10

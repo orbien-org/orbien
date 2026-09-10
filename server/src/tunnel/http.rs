@@ -1,9 +1,8 @@
 use super::gw::{
     build_domains, expand_locations, normalize_host, route_basic_auth_ok, HttpGw, HttpRoute,
 };
-use crate::access::{prepare_ingress, AccessPolicy};
+use crate::access::prepare_ingress;
 use crate::control::Control;
-use crate::metrics::ServerMetrics;
 use anyhow::{anyhow, bail, Result};
 use httparse::Status;
 use orbien_core::limit::{maybe_limit, BandwidthLimiter};
@@ -36,26 +35,23 @@ impl HttpTunnel {
         let basic_auth_user = np.basic_auth_user.clone();
         let basic_auth_password = np.basic_auth_password.clone();
 
-        gw.unregister_tunnel(&name).await;
+        gw.unregister_tunnel(&name);
 
         for domain in &domains {
             for location in &locations {
-                if let Err(e) = gw
-                    .register(
-                        domain,
-                        HttpRoute {
-                            tunnel_name: name.clone(),
-                            control: Arc::downgrade(&control),
-                            location: location.clone(),
-                            host_header_rewrite: rewrite.clone(),
-                            basic_auth_user: basic_auth_user.clone(),
-                            basic_auth_password: basic_auth_password.clone(),
-                            limiter: limiter.clone(),
-                        },
-                    )
-                    .await
-                {
-                    gw.unregister_tunnel(&name).await;
+                if let Err(e) = gw.register(
+                    domain,
+                    HttpRoute {
+                        tunnel_name: name.clone(),
+                        control: Arc::downgrade(&control),
+                        location: location.clone(),
+                        host_header_rewrite: rewrite.clone(),
+                        basic_auth_user: basic_auth_user.clone(),
+                        basic_auth_password: basic_auth_password.clone(),
+                        limiter: limiter.clone(),
+                    },
+                ) {
+                    gw.unregister_tunnel(&name);
                     return Err(e);
                 }
             }
@@ -78,13 +74,23 @@ impl HttpTunnel {
     }
 
     pub async fn close(&self) {
+        self.shutdown();
+    }
+
+    fn shutdown(&self) {
         if self
             .closed
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
-            self.gw.unregister_tunnel(&self.name).await;
+            self.gw.unregister_tunnel(&self.name);
         }
+    }
+}
+
+impl Drop for HttpTunnel {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -92,7 +98,6 @@ pub async fn run_http_gw_listener(
     bind_addr: String,
     port: u16,
     gw: Arc<HttpGw>,
-    access: Arc<AccessPolicy>,
     shutdown: Arc<Notify>,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
@@ -107,9 +112,8 @@ pub async fn run_http_gw_listener(
                     Ok((stream, peer)) => {
                         orbien_core::net::enable_nodelay(&stream);
                         let gw = Arc::clone(&gw);
-                        let access = Arc::clone(&access);
                         tokio::spawn(async move {
-                            if let Err(e) = handle_http_ingress(gw, stream, peer, access).await {
+                            if let Err(e) = handle_http_ingress(gw, stream, peer).await {
                                 tracing::debug!(%peer, error = %e, "http ingress ended");
                             }
                         });
@@ -127,6 +131,7 @@ pub async fn run_http_gw_listener(
 
 struct ParsedHttpHead {
     raw: Vec<u8>,
+    body_prefix: Vec<u8>,
     host: String,
     path: String,
     is_proxy_request: bool,
@@ -138,12 +143,11 @@ async fn handle_http_ingress(
     gw: Arc<HttpGw>,
     stream: TcpStream,
     peer: std::net::SocketAddr,
-    access: Arc<AccessPolicy>,
 ) -> Result<()> {
-    let mut ingress = prepare_ingress(stream, peer, &access).await?;
+    let mut ingress = prepare_ingress(stream, peer);
     let head = read_http_request_head(&mut ingress.stream).await?;
 
-    let Some(route) = gw.lookup(&head.host, &head.path).await else {
+    let Some(route) = gw.lookup(&head.host, &head.path) else {
         tracing::debug!(
             peer = %ingress.peer,
             source = %ingress.source,
@@ -209,8 +213,11 @@ async fn handle_http_ingress(
         .await?;
 
     let mut data = maybe_limit(data, route.limiter.clone());
-    let head_len = raw.len() as u64;
+    let preamble_len = (raw.len() + head.body_prefix.len()) as u64;
     data.write_all(&raw).await?;
+    if !head.body_prefix.is_empty() {
+        data.write_all(&head.body_prefix).await?;
+    }
     tracing::debug!(
         tunnel = %route.tunnel_name,
         host = %head.host,
@@ -221,9 +228,11 @@ async fn handle_http_ingress(
     );
     let _guard = control.metrics.track_connection(&route.tunnel_name, "http");
     let (to_data, from_data, err) = orbien_core::io::join_counted(ingress.stream, data).await;
-    control
-        .metrics
-        .add_traffic_in(&route.tunnel_name, "http", to_data.saturating_add(head_len));
+    control.metrics.add_traffic_in(
+        &route.tunnel_name,
+        "http",
+        to_data.saturating_add(preamble_len),
+    );
     control
         .metrics
         .add_traffic_out(&route.tunnel_name, "http", from_data);
@@ -249,7 +258,10 @@ async fn read_http_request_head<R: AsyncRead + Unpin>(stream: &mut R) -> Result<
         let mut headers = [httparse::EMPTY_HEADER; 64];
         let mut req = httparse::Request::new(&mut headers);
         match req.parse(&buf)? {
-            Status::Complete(_) => {
+            Status::Complete(header_len) => {
+                if header_len > buf.len() {
+                    bail!("httparse header length exceeds buffer");
+                }
                 let method = req.method.unwrap_or("").to_string();
                 let target = req.path.unwrap_or("/").to_string();
                 let (is_proxy_request, path) = classify_request_target(&method, &target);
@@ -265,8 +277,10 @@ async fn read_http_request_head<R: AsyncRead + Unpin>(stream: &mut R) -> Result<
                 let authorization = header_value(&req, "authorization");
                 let proxy_authorization = header_value(&req, "proxy-authorization");
 
+                let body_prefix = buf.split_off(header_len);
                 return Ok(ParsedHttpHead {
                     raw: buf,
+                    body_prefix,
                     host: normalize_host(&host),
                     path,
                     is_proxy_request,
@@ -324,7 +338,17 @@ fn rewrite_host_header(buf: &mut Vec<u8>, new_host: &str) -> Result<()> {
     let text = String::from_utf8_lossy(buf);
     let mut out = String::new();
     let mut replaced = false;
+    let mut in_headers = true;
     for line in text.split_inclusive('\n') {
+        if !in_headers {
+            out.push_str(line);
+            continue;
+        }
+        if line == "\r\n" || line == "\n" {
+            out.push_str(line);
+            in_headers = false;
+            continue;
+        }
         let trimmed_start = line.trim_start_matches([' ', '\t']);
         if !replaced
             && trimmed_start.len() >= 5

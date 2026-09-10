@@ -6,9 +6,9 @@ use orbien_core::transport::{
     Protocol, QuicSession, YamuxClient,
 };
 use rustls::ClientConfig as RustlsClientConfig;
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpStream;
+use tokio::net::{lookup_host, TcpStream};
 
 #[async_trait]
 pub trait Connector: Send + Sync {
@@ -76,12 +76,13 @@ pub async fn build_connector(cfg: &ClientConfig) -> Result<Arc<dyn Connector>> {
             } else {
                 Ok(Arc::new(WebsocketConnector {
                     endpoint: cfg.server_endpoint(),
+                    ws_path: cfg.transport.ws_path.clone(),
                     tls,
                 }))
             }
         }
         Protocol::Kcp => {
-            let addr = resolve_addr(cfg)?;
+            let addr = resolve_addr(cfg).await?;
             if cfg.transport.tcp_mux {
                 let stream = dial_kcp_tls(addr, &tls).await?;
                 tracing::info!(
@@ -97,7 +98,7 @@ pub async fn build_connector(cfg: &ClientConfig) -> Result<Arc<dyn Connector>> {
             }
         }
         Protocol::Quic => {
-            let addr = resolve_addr(cfg)?;
+            let addr = resolve_addr(cfg).await?;
             let t = &cfg.transport.tls;
             let session = QuicSession::dial(
                 addr,
@@ -125,7 +126,7 @@ async fn dial_tcp_tls(cfg: &ClientConfig, tls: &TlsDialOpts) -> Result<DynStream
 }
 
 async fn dial_ws_tls(cfg: &ClientConfig, tls: &TlsDialOpts) -> Result<DynStream> {
-    let stream = dial_websocket(&cfg.server_endpoint()).await?;
+    let stream = dial_websocket(&cfg.server_endpoint(), &cfg.transport.ws_path).await?;
     tls.maybe_wrap(stream).await
 }
 
@@ -134,11 +135,13 @@ async fn dial_kcp_tls(addr: SocketAddr, tls: &TlsDialOpts) -> Result<DynStream> 
     tls.maybe_wrap(stream).await
 }
 
-fn resolve_addr(cfg: &ClientConfig) -> Result<SocketAddr> {
-    cfg.server_endpoint()
-        .to_socket_addrs()?
+async fn resolve_addr(cfg: &ClientConfig) -> Result<SocketAddr> {
+    let endpoint = cfg.server_endpoint();
+    let addr = lookup_host(endpoint.as_str())
+        .await?
         .next()
-        .ok_or_else(|| anyhow!("cannot resolve {}", cfg.server_endpoint()))
+        .ok_or_else(|| anyhow!("cannot resolve {endpoint}"))?;
+    Ok(addr)
 }
 
 struct YamuxConnector {
@@ -168,13 +171,14 @@ impl Connector for TcpConnector {
 
 struct WebsocketConnector {
     endpoint: String,
+    ws_path: String,
     tls: TlsDialOpts,
 }
 
 #[async_trait]
 impl Connector for WebsocketConnector {
     async fn open(&self) -> Result<DynStream> {
-        let stream = dial_websocket(&self.endpoint).await?;
+        let stream = dial_websocket(&self.endpoint, &self.ws_path).await?;
         self.tls.maybe_wrap(stream).await
     }
 }

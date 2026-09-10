@@ -19,13 +19,17 @@ impl Control {
     }
 
     async fn spawn_refill(self: &Arc<Self>) {
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
         let ctl = Arc::clone(self);
-        self.bg_tasks.lock().await.spawn(async move {
+        self.spawn_bg(async move {
             if ctl.closed.load(Ordering::SeqCst) {
                 return;
             }
             let _ = ctl.request_data_conn().await;
-        });
+        })
+        .await;
     }
 
     pub async fn get_data_conn(self: &Arc<Self>) -> Result<DynStream> {

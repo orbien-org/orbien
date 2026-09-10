@@ -173,6 +173,7 @@ fn apply_config_to_ui(ui: &AppWindow, cfg: &orbien_client::ClientConfig) {
     let is_quic = protocol_idx == 2;
     ui.set_protocol_index(protocol_idx);
     ui.set_pool_count(cfg.transport.pool_count.to_string().into());
+    ui.set_ws_path(config_bridge::ws_path_display(&cfg.transport.ws_path).into());
     ui.set_tcp_mux(!is_quic && cfg.transport.tcp_mux);
     ui.set_tls_enable(is_quic || cfg.transport.tls.enable);
     ui.set_config_mux_keepalive(cfg.transport.mux_keepalive_secs.to_string().into());
@@ -231,6 +232,7 @@ fn persist_server_config(ui: &AppWindow) -> Result<(), String> {
         &ui.get_pool_count(),
         ui.get_tcp_mux(),
         ui.get_tls_enable(),
+        &ui.get_ws_path(),
         &ui.get_config_mux_keepalive(),
         &ui.get_config_heartbeat_interval(),
         &ui.get_config_heartbeat_timeout(),
@@ -811,6 +813,7 @@ fn main() -> Result<(), slint::PlatformError> {
                             &ui.get_pool_count(),
                             ui.get_tcp_mux(),
                             ui.get_tls_enable(),
+                            &ui.get_ws_path(),
                             &ui.get_config_mux_keepalive(),
                             &ui.get_config_heartbeat_interval(),
                             &ui.get_config_heartbeat_timeout(),
@@ -1339,6 +1342,7 @@ fn wire_tunnel_and_config(
             ui.set_user("".into());
             ui.set_protocol_index(0);
             ui.set_pool_count("1".into());
+            ui.set_ws_path("".into());
             ui.set_tcp_mux(true);
             ui.set_tls_enable(true);
             ui.set_config_mux_keepalive("30".into());

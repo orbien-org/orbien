@@ -18,7 +18,6 @@ tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 uuid = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 quinn = { workspace = true }
 kcp-tokio = { workspace = true }
 httparse = { workspace = true }
