@@ -79,6 +79,7 @@ export component ConfigPage inherits Rectangle {
     in-out property <string> user: "";
     in-out property <int> protocol-index: 0;
     in-out property <string> pool-count: "1";
+    in-out property <string> ws-path: "";
     in-out property <bool> tcp-mux: true;
     in-out property <bool> tls-enable: true;
     in-out property <bool> show-advanced: false;
@@ -98,6 +99,7 @@ export component ConfigPage inherits Rectangle {
     callback reset-clicked;
     callback pick-file(string);
 
+    private property <bool> is-websocket: root.protocol-index == 1;
     private property <bool> is-quic: root.protocol-index == 2;
     private property <bool> is-kcp: root.protocol-index == 3;
     private property <bool> mux-applicable: !root.is-quic;
@@ -337,6 +339,27 @@ export component ConfigPage inherits Rectangle {
                                     browse-clicked => {
                                         root.pick-file("tls-key");
                                     }
+                                }
+                            }
+                        }
+
+                        if root.is-websocket: VerticalLayout {
+                            spacing: 12px;
+                            vertical-stretch: 0;
+                            alignment: stretch;
+
+                            SubSectionTitle { text: Tr.config-websocket; }
+                            FormRow {
+                                FormField {
+                                    label: Tr.config-ws-path;
+                                    value <=> root.ws-path;
+                                    placeholder: Tr.config-ws-path-hint;
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 0;
+                                    height: 60px;
+                                    background: transparent;
                                 }
                             }
                         }

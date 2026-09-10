@@ -107,6 +107,7 @@ pub fn load_merge_server_fields(
     pool_count: &str,
     tcp_mux: bool,
     tls_enable: bool,
+    ws_path: &str,
     mux_keepalive: &str,
     heartbeat_interval: &str,
     heartbeat_timeout: &str,
@@ -151,6 +152,7 @@ pub fn load_merge_server_fields(
     cfg.transport.pool_count = pool_count.trim().parse().unwrap_or(1);
     let is_quic = protocol_index == 2;
     cfg.transport.tcp_mux = !is_quic && tcp_mux;
+    cfg.transport.ws_path = ws_path.trim().into();
     cfg.transport.mux_keepalive_secs = mux_keepalive.trim().parse().unwrap_or(30);
     cfg.transport.heartbeat_interval = parse_optional_i64(heartbeat_interval, -1);
     cfg.transport.heartbeat_timeout = parse_optional_i64(heartbeat_timeout, -1);
@@ -497,5 +499,14 @@ pub fn optional_i64_display(v: i64) -> String {
         String::new()
     } else {
         v.to_string()
+    }
+}
+
+pub fn ws_path_display(path: &str) -> String {
+    let t = path.trim();
+    if t.is_empty() || t == orbien_core::transport::ORBIEN_WEBSOCKET_PATH {
+        String::new()
+    } else {
+        t.to_string()
     }
 }
