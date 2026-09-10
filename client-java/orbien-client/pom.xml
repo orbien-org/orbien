@@ -6,7 +6,7 @@
   <parent>
     <groupId>io.github.lxien</groupId>
     <artifactId>orbien</artifactId>
-    <version>3.6.0-dev</version>
+    <version>3.6.0-beta.1</version>
   </parent>
 
   <artifactId>orbien-client</artifactId>
