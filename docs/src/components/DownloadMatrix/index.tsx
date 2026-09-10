@@ -7,7 +7,7 @@ import styles from './styles.module.css';
 
 const REPO = 'orbien-org/orbien';
 
-const FALLBACK_VERSION = '3.6.0-beta.1';
+const FALLBACK_VERSION = '3.6.0';
 
 type OsId = 'windows' | 'linux' | 'darwin' | 'freebsd';
 type ArchId = 'amd64' | 'arm64';
