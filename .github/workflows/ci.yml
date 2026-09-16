@@ -28,6 +28,14 @@ jobs:
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
 
+      - name: Install Linux GUI deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libwayland-dev libegl1-mesa-dev \
+            libfontconfig1-dev
+
       - name: fmt
         run: cargo fmt --all -- --check
 
