@@ -10,6 +10,7 @@ impl Service {
     pub(super) async fn run_tcp(self: Arc<Self>, listener: TcpListener) -> Result<()> {
         loop {
             let (stream, peer) = listener.accept().await?;
+            orbien_core::net::enable_nodelay(&stream);
             let svc = Arc::clone(&self);
             tokio::spawn(async move {
                 if let Err(e) = svc.handle_tcp_or_websocket(stream, peer).await {
