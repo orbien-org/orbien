@@ -8,7 +8,7 @@ pub use client::{
 };
 pub use env::{contains_env_placeholders, expand_env_placeholders};
 pub use server::{
-    parse_host_port, DashboardConfig, QuicOptions, ServerConfig, ServerTlsConfig,
+    parse_host_port, DashboardConfig, QuicConfig, ServerConfig, ServerTlsConfig,
     ServerTransportConfig,
 };
 

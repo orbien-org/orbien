@@ -37,6 +37,7 @@ impl TcpTunnel {
         let limiter_spawn = limiter.clone();
 
         let control_weak = Arc::downgrade(&control);
+        let keepalive = control.tcp_keepalive();
 
         let accept_task = tokio::spawn(async move {
             loop {
@@ -45,7 +46,7 @@ impl TcpTunnel {
                     accepted = listener.accept() => {
                         match accepted {
                             Ok((stream, peer)) => {
-                                orbien_core::net::enable_nodelay(&stream);
+                                orbien_core::net::tune_tcp_stream(&stream, keepalive);
                                 if closed_flag.load(Ordering::SeqCst) {
                                     break;
                                 }

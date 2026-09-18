@@ -67,13 +67,27 @@ pub struct ServerTransportConfig {
     )]
     pub mux_keepalive_secs: i64,
 
+    #[serde(
+        default = "default_tcp_keepalive_idle",
+        rename = "tcpKeepaliveIdle",
+        alias = "tcp_keepalive_idle"
+    )]
+    pub tcp_keepalive_idle: u64,
+
+    #[serde(
+        default = "default_tcp_keepalive_interval",
+        rename = "tcpKeepaliveInterval",
+        alias = "tcp_keepalive_interval"
+    )]
+    pub tcp_keepalive_interval: u64,
+
     #[serde(default, rename = "maxConnPool", alias = "max_conn_pool")]
     pub max_conn_pool: i64,
 
     #[serde(default, rename = "heartbeatTimeout", alias = "heartbeat_timeout")]
     pub heartbeat_timeout: i64,
     #[serde(default)]
-    pub quic: QuicOptions,
+    pub quic: QuicConfig,
 
     #[serde(default = "default_ws_path", rename = "wsPath", alias = "ws_path")]
     pub ws_path: String,
@@ -87,12 +101,20 @@ impl Default for ServerTransportConfig {
         Self {
             tcp_mux: default_tcp_mux(),
             mux_keepalive_secs: default_tcp_mux_keepalive(),
+            tcp_keepalive_idle: default_tcp_keepalive_idle(),
+            tcp_keepalive_interval: default_tcp_keepalive_interval(),
             max_conn_pool: 0,
             heartbeat_timeout: 0,
-            quic: QuicOptions::default(),
+            quic: QuicConfig::default(),
             ws_path: default_ws_path(),
             tls: ServerTlsConfig::default(),
         }
+    }
+}
+
+impl ServerTransportConfig {
+    pub fn tcp_keepalive(&self) -> crate::net::TcpKeepaliveConfig {
+        crate::net::TcpKeepaliveConfig::new(self.tcp_keepalive_idle, self.tcp_keepalive_interval)
     }
 }
 
@@ -159,8 +181,16 @@ fn default_tcp_mux_keepalive() -> i64 {
     30
 }
 
+fn default_tcp_keepalive_idle() -> u64 {
+    crate::net::DEFAULT_TCP_KEEPALIVE_IDLE_SECS
+}
+
+fn default_tcp_keepalive_interval() -> u64 {
+    crate::net::DEFAULT_TCP_KEEPALIVE_INTERVAL_SECS
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QuicOptions {
+pub struct QuicConfig {
     #[serde(
         default = "default_quic_keepalive",
         rename = "keepalivePeriod",
@@ -181,7 +211,7 @@ pub struct QuicOptions {
     pub max_incoming_streams: u32,
 }
 
-impl Default for QuicOptions {
+impl Default for QuicConfig {
     fn default() -> Self {
         Self {
             keepalive_period: default_quic_keepalive(),
@@ -191,7 +221,7 @@ impl Default for QuicOptions {
     }
 }
 
-impl QuicOptions {
+impl QuicConfig {
     pub fn keepalive(&self) -> Duration {
         Duration::from_secs(self.keepalive_period.max(1))
     }

@@ -32,11 +32,15 @@ pub async fn accept_websocket(stream: TcpStream) -> Result<DynStream> {
     Ok(WsByteStream::new(ws).boxed())
 }
 
-pub async fn dial_websocket(endpoint: &str, path: &str) -> Result<DynStream> {
+pub async fn dial_websocket(
+    endpoint: &str,
+    path: &str,
+    keepalive: crate::net::TcpKeepaliveConfig,
+) -> Result<DynStream> {
     let stream = TcpStream::connect(endpoint)
         .await
         .with_context(|| format!("tcp dial for websocket {endpoint}"))?;
-    crate::net::enable_nodelay(&stream);
+    crate::net::tune_tcp_stream(&stream, keepalive);
     let url = format!("ws://{endpoint}{path}");
     let (ws, _resp) = client_async(&url, stream)
         .await

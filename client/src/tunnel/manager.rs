@@ -7,6 +7,7 @@ use orbien_core::limit::{self, maybe_limit, BandwidthLimitSide, BandwidthLimiter
 use orbien_core::msg::StartDataConn;
 use orbien_core::net::{
     addrs_from_start_data_conn, build_proxy_protocol_header, parse_proxy_protocol_version,
+    TcpKeepaliveConfig,
 };
 use orbien_core::transport::DynStream;
 use std::collections::HashMap;
@@ -20,12 +21,14 @@ struct TunnelEntry {
     limiter: Option<Arc<BandwidthLimiter>>,
     plugin: Option<Arc<dyn Plugin>>,
     proxy_protocol: Option<&'static str>,
+    tcp_keepalive: TcpKeepaliveConfig,
     udp_cancel: AsyncMutex<Option<oneshot::Sender<()>>>,
 }
 
 pub struct TunnelManager {
     by_name: RwLock<HashMap<String, Arc<TunnelEntry>>>,
     udp_packet_size: usize,
+    tcp_keepalive: TcpKeepaliveConfig,
 }
 
 impl TunnelManager {
@@ -33,6 +36,7 @@ impl TunnelManager {
         let mgr = Self {
             by_name: RwLock::new(HashMap::new()),
             udp_packet_size: cfg.udp_packet_size.max(512),
+            tcp_keepalive: cfg.transport.tcp_keepalive(),
         };
         for t in &cfg.tunnels {
             mgr.upsert(t)?;
@@ -41,7 +45,7 @@ impl TunnelManager {
     }
 
     pub fn upsert(&self, tunnel: &TunnelConfig) -> Result<()> {
-        let entry = build_entry(tunnel)?;
+        let entry = build_entry(tunnel, self.tcp_keepalive)?;
         self.by_name
             .write()
             .unwrap_or_else(|e| e.into_inner())
@@ -124,7 +128,7 @@ impl TunnelManager {
                 e
             )
         })?;
-        orbien_core::net::enable_nodelay(&local);
+        orbien_core::net::tune_tcp_stream(&local, entry.tcp_keepalive);
         let mut local = local;
 
         if let Some(ver) = entry.proxy_protocol {
@@ -222,7 +226,10 @@ async fn serve_entry(
     }
 }
 
-fn build_entry(tunnel: &TunnelConfig) -> Result<Arc<TunnelEntry>> {
+fn build_entry(
+    tunnel: &TunnelConfig,
+    tcp_keepalive: TcpKeepaliveConfig,
+) -> Result<Arc<TunnelEntry>> {
     let limiter = limit::limiter_if_side(
         tunnel.transport.bandwidth,
         &tunnel.transport.bandwidth_limit_side,
@@ -254,6 +261,7 @@ fn build_entry(tunnel: &TunnelConfig) -> Result<Arc<TunnelEntry>> {
             let ctx = PluginContext {
                 name: tunnel.name.clone(),
                 cert_common_name: cn,
+                tcp_keepalive,
             };
             Some(plugin::create(ctx, pc)?)
         }
@@ -275,6 +283,7 @@ fn build_entry(tunnel: &TunnelConfig) -> Result<Arc<TunnelEntry>> {
         limiter,
         plugin,
         proxy_protocol,
+        tcp_keepalive,
         udp_cancel: AsyncMutex::new(None),
     }))
 }
