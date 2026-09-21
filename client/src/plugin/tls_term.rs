@@ -20,7 +20,7 @@ impl TlsTermPlugin {
     pub fn new(ctx: PluginContext, cfg: &PluginConfig) -> Result<Self> {
         let local_addr = cfg.service.trim().to_string();
         if local_addr.is_empty() {
-            bail!("tls-term requires plugin.service (e.g. \"127.0.0.1:80\")");
+            bail!("tls-term requires plugin.service (e.g. \"127.0.0.1:8080\")");
         }
 
         let cn = if ctx.cert_common_name.is_empty() {
