@@ -13,7 +13,6 @@ impl Control {
         self.metrics
             .new_tunnel(name, tunnel_type, &self.user, &self.session_id);
     }
-
     fn tunnel_transport(np: &NewTunnel) -> Result<Option<Arc<BandwidthLimiter>>> {
         let limiter = orbien_core::limit::limiter_if_side(
             np.bandwidth,

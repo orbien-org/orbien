@@ -28,7 +28,7 @@ pub fn is_websocket_http_request(peeked: &[u8], path: &str) -> bool {
 pub async fn accept_websocket(stream: TcpStream) -> Result<DynStream> {
     let ws = accept_async(stream)
         .await
-        .context("websocket server accept/upgrade")?;
+        .context("websocket server accept or upgrade")?;
     Ok(WsByteStream::new(ws).boxed())
 }
 

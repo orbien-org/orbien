@@ -7,9 +7,7 @@ import java.util.Objects;
 public final class OrbienClientConfig {
     private static final String DEFAULT_SERVER = "127.0.0.1:9527";
     private static final int DEFAULT_PORT = 9527;
-
     private String server = DEFAULT_SERVER;
-
     private String token = "";
     private boolean tcpMux = false;
     private int poolCount = 1;

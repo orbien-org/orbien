@@ -82,7 +82,7 @@ impl Service {
             %tcp_addr,
             ws_path = %this.cfg.transport.ws_path,
             tcp_mux = this.cfg.transport.tcp_mux,
-            "tcp/websocket control/data listener ready"
+            "tcp or websocket control or data listener ready"
         );
 
         let gw_shutdown = Arc::new(Notify::new());
@@ -127,7 +127,7 @@ impl Service {
                 &this.cfg.transport.tls.key_file,
                 &this.cfg.transport.tls.trusted_ca_file,
             )?;
-            tracing::info!(%quic_addr, "quic control/data listener ready");
+            tracing::info!(%quic_addr, "quic control or data listener ready");
             let svc = Arc::clone(&this);
             set.spawn(async move { svc.run_quic(endpoint).await });
         }
@@ -140,7 +140,7 @@ impl Service {
             tracing::info!(
                 %kcp_addr,
                 tcp_mux = this.cfg.transport.tcp_mux,
-                "kcp control/data listener ready"
+                "kcp control or data listener ready"
             );
             let svc = Arc::clone(&this);
             set.spawn(async move { svc.run_kcp(listener).await });

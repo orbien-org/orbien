@@ -14,7 +14,7 @@ impl Service {
             let svc = Arc::clone(&self);
             tokio::spawn(async move {
                 if let Err(e) = svc.handle_tcp_or_websocket(stream, peer).await {
-                    tracing::warn!(%peer, error = %e, "tcp/ws connection closed with error");
+                    tracing::warn!(%peer, error = %e, "tcp or ws connection closed with error");
                 }
             });
         }

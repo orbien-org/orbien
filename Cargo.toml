@@ -11,7 +11,7 @@ members = [
 version = "3.6.1-beta.1"
 edition = "2021"
 license = "Apache-2.0"
-authors = ["orbien"]
+authors = ["orbien-org","lxien"]
 
 
 [profile.release]
