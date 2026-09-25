@@ -14,6 +14,8 @@ use tokio::net::{lookup_host, TcpStream};
 #[async_trait]
 pub trait Connector: Send + Sync {
     async fn open(&self) -> Result<DynStream>;
+
+    fn close(&self) {}
 }
 
 struct TlsDialOpts {
@@ -165,6 +167,10 @@ impl Connector for YamuxConnector {
     async fn open(&self) -> Result<DynStream> {
         self.yamux.open_stream().await
     }
+
+    fn close(&self) {
+        self.yamux.close();
+    }
 }
 
 struct TcpConnector {
@@ -218,5 +224,9 @@ struct QuicConnector {
 impl Connector for QuicConnector {
     async fn open(&self) -> Result<DynStream> {
         self.session.open_stream().await
+    }
+
+    fn close(&self) {
+        self.session.close();
     }
 }

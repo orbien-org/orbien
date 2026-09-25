@@ -1,6 +1,7 @@
 use super::stream::{boxed_stream, DynStream};
 use anyhow::{anyhow, Result};
 use std::future::poll_fn;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
@@ -23,13 +24,18 @@ type OpenReply = oneshot::Sender<Result<DynStream>>;
 
 pub struct YamuxClient {
     open_tx: mpsc::Sender<OpenReply>,
+    stop_tx: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 impl YamuxClient {
     pub fn start(io: DynStream) -> Self {
         let (open_tx, open_rx) = mpsc::channel::<OpenReply>(64);
-        tokio::spawn(drive_client(io, open_rx));
-        Self { open_tx }
+        let (stop_tx, stop_rx) = oneshot::channel();
+        tokio::spawn(drive_client(io, open_rx, stop_rx));
+        Self {
+            open_tx,
+            stop_tx: Mutex::new(Some(stop_tx)),
+        }
     }
 
     pub async fn open_stream(&self) -> Result<DynStream> {
@@ -41,12 +47,36 @@ impl YamuxClient {
         rx.await
             .map_err(|_| anyhow!("yamux open_stream cancelled"))?
     }
+
+    pub fn close(&self) {
+        if let Some(tx) = self
+            .stop_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            let _ = tx.send(());
+        }
+    }
 }
 
-async fn drive_client(io: DynStream, mut open_rx: mpsc::Receiver<OpenReply>) {
+async fn drive_client(
+    io: DynStream,
+    mut open_rx: mpsc::Receiver<OpenReply>,
+    mut stop_rx: oneshot::Receiver<()>,
+) {
     let mut conn = yamux::Connection::new(io.compat(), yamux_config(), yamux::Mode::Client);
     loop {
         tokio::select! {
+            _ = &mut stop_rx => {
+                if tokio::time::timeout(CLOSE_TIMEOUT, poll_fn(|cx| conn.poll_close(cx)))
+                    .await
+                    .is_err()
+                {
+                    tracing::debug!("yamux client close timed out, dropping connection");
+                }
+                break;
+            }
             cmd = open_rx.recv() => {
                 match cmd {
                     Some(reply) => {

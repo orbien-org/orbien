@@ -116,7 +116,7 @@ impl TunnelManager {
         let local_addr = entry.cfg.service.trim().to_string();
         if local_addr.is_empty() || svc_port == 0 {
             return Err(anyhow!(
-                "tunnel {} has empty/invalid service (local backend)",
+                "tunnel {} has empty or invalid service (local backend)",
                 entry.cfg.name
             ));
         }

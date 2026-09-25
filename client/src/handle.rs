@@ -3,12 +3,16 @@ use crate::reload::ReloadOutcome;
 use crate::service::{ReloadRequest, Service};
 use anyhow::{anyhow, bail, Result};
 use orbien_core::config::ClientConfig;
+use orbien_core::transport::Protocol;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot, RwLock};
 use tokio::task::JoinHandle;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+
+const UDP_SESSION_DRAIN: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientStatus {
@@ -280,6 +284,17 @@ impl ClientHandle {
                 .ok_or_else(|| anyhow!("missing cancel token"))?
         };
 
+        let drain_udp = is_foreground && needs_udp_session_drain(&cfg);
+        if drain_udp {
+            let token = cancel.clone();
+            tokio::spawn(async move {
+                if wait_termination_signal().await {
+                    tracing::info!("termination signal received; draining udp session");
+                    token.cancel();
+                }
+            });
+        }
+
         if is_foreground {
             self.set_status(ClientStatus::Starting);
             self.set_error(None);
@@ -334,6 +349,10 @@ impl ClientHandle {
                 on_remotes_clear,
             )
             .await;
+
+        if drain_udp {
+            sleep(UDP_SESSION_DRAIN).await;
+        }
 
         if is_foreground {
             self.clear_tunnel_remotes();
@@ -420,5 +439,43 @@ impl ClientHandle {
         }
         self.clear_tunnel_remotes();
         self.clear_reload_tx();
+    }
+}
+
+fn needs_udp_session_drain(cfg: &ClientConfig) -> bool {
+    matches!(cfg.protocol().ok(), Some(Protocol::Quic | Protocol::Kcp))
+}
+
+async fn wait_termination_signal() -> bool {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to install SIGTERM handler");
+                return false;
+            }
+        };
+        tokio::select! {
+            res = tokio::signal::ctrl_c() => {
+                if let Err(e) = res {
+                    tracing::warn!(error = %e, "failed to wait for Ctrl-C");
+                    return false;
+                }
+                true
+            }
+            _ = sigterm.recv() => true,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to wait for Ctrl-C");
+                false
+            }
+        }
     }
 }

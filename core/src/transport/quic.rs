@@ -124,6 +124,10 @@ impl QuicSession {
         Ok(QuicBiStream::new(send, recv).boxed())
     }
 
+    pub fn close(&self) {
+        self.conn.close(VarInt::from_u32(0), b"client shutdown");
+    }
+
     pub fn remote_address(&self) -> SocketAddr {
         self.conn.remote_address()
     }
