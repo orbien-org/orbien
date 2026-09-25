@@ -3,6 +3,7 @@ use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use httparse::Status;
 use orbien_core::config::PluginConfig;
+use orbien_core::net::TcpKeepaliveConfig;
 use orbien_core::tls::load_or_generate_https_server_config;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -12,13 +13,14 @@ pub struct TlsTermPlugin {
     local_addr: String,
     host_header_rewrite: String,
     acceptor: TlsAcceptor,
+    tcp_keepalive: TcpKeepaliveConfig,
 }
 
 impl TlsTermPlugin {
     pub fn new(ctx: PluginContext, cfg: &PluginConfig) -> Result<Self> {
         let local_addr = cfg.service.trim().to_string();
         if local_addr.is_empty() {
-            bail!("tls-term requires plugin.service (e.g. \"127.0.0.1:80\")");
+            bail!("tls-term requires plugin.service (e.g. \"127.0.0.1:8080\")");
         }
 
         let cn = if ctx.cert_common_name.is_empty() {
@@ -40,6 +42,7 @@ impl TlsTermPlugin {
             local_addr,
             host_header_rewrite: cfg.host_header_rewrite.clone(),
             acceptor,
+            tcp_keepalive: ctx.tcp_keepalive,
         })
     }
 }
@@ -60,7 +63,7 @@ impl Plugin for TlsTermPlugin {
         let mut local = TcpStream::connect(&self.local_addr)
             .await
             .map_err(|e| anyhow!("tls-term dial {}: {e}", self.local_addr))?;
-        orbien_core::net::enable_nodelay(&local);
+        orbien_core::net::tune_tcp_stream(&local, self.tcp_keepalive);
 
         let (mut tls_r, mut tls_w) = tokio::io::split(tls);
         let (mut headers, body_prefix) = read_http_request_head(&mut tls_r).await?;

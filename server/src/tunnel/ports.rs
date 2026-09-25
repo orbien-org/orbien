@@ -11,7 +11,6 @@ impl PortTable {
     pub fn new() -> Self {
         Self::default()
     }
-
     pub fn claim(&self, port: u16, tunnel_name: &str) -> Result<()> {
         if port == 0 {
             return Err(anyhow!("invalid remote port 0"));

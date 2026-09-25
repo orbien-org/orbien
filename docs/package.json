@@ -1,6 +1,6 @@
 {
   "name": "orbien-docs",
-  "version": "3.6.1",
+  "version": "3.7.0-beta.1",
   "private": true,
   "scripts": {
     "docusaurus": "docusaurus",
@@ -37,7 +37,15 @@
   },
   "pnpm": {
     "overrides": {
-      "webpackbar": "^7.0.0"
+      "webpackbar": "^7.0.0",
+      "js-yaml": "4.3.2",
+      "fast-uri": "3.1.7",
+      "svgo": "3.3.5",
+      "qs": "6.16.0",
+      "serialize-javascript": "7.0.5",
+      "image-size": "npm:image-size-next@2.1.1",
+      "colord": "2.9.4",
+      "joi": "17.13.8"
     },
     "onlyBuiltDependencies": [
       "@swc/core",

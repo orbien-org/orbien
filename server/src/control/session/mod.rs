@@ -130,6 +130,10 @@ impl Control {
         }
     }
 
+    pub fn tcp_keepalive(&self) -> orbien_core::net::TcpKeepaliveConfig {
+        self.cfg.transport.tcp_keepalive()
+    }
+
     pub fn is_closed(&self) -> bool {
         self.closed.load(Ordering::Acquire)
     }

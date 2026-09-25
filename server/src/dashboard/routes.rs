@@ -20,7 +20,6 @@ use std::sync::Arc;
 #[derive(Embed)]
 #[folder = "assets/"]
 struct Assets;
-
 pub fn router(state: Arc<DashState>) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))

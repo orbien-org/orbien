@@ -172,7 +172,7 @@ impl Service {
         nw: NewDataConn,
     ) -> Result<()> {
         if nw.session_id.trim().is_empty() {
-            return Err(anyhow!("empty session_id for data conn"));
+            return Err(anyhow!("empty session_id for data connection"));
         }
         if let Err(reason) = auth::verify_auth_digest(
             &self.cfg.auth.token,
@@ -198,7 +198,7 @@ impl Service {
                 Ok(())
             }
             None => Err(anyhow!(
-                "no accepting control for data conn session_id={}",
+                "no accepting control for data connection session_id={}",
                 nw.session_id
             )),
         }

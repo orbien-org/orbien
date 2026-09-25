@@ -4,6 +4,7 @@ mod tls_term;
 use anyhow::{bail, Result};
 use async_trait::async_trait;
 use orbien_core::config::PluginConfig;
+use orbien_core::net::TcpKeepaliveConfig;
 use orbien_core::transport::DynStream;
 use std::sync::Arc;
 
@@ -11,6 +12,7 @@ use std::sync::Arc;
 pub struct PluginContext {
     pub name: String,
     pub cert_common_name: String,
+    pub tcp_keepalive: TcpKeepaliveConfig,
 }
 
 #[allow(dead_code)]

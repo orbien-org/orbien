@@ -17,6 +17,8 @@ token = "YOUR_TOKEN"
 [transport]
 tcpMux = true
 muxKeepaliveSecs = 30
+tcpKeepaliveIdle = 30
+tcpKeepaliveInterval = 10
 maxConnPool = 10
 heartbeatTimeout = 90
 wsPath = "/ws"

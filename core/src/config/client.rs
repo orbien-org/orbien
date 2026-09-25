@@ -1,4 +1,4 @@
-use super::server::{parse_host_port, QuicOptions};
+use super::server::{parse_host_port, QuicConfig};
 use anyhow::{anyhow, Context};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -62,6 +62,20 @@ pub struct TransportConfig {
     pub mux_keepalive_secs: i64,
 
     #[serde(
+        default = "default_tcp_keepalive_idle",
+        rename = "tcpKeepaliveIdle",
+        alias = "tcp_keepalive_idle"
+    )]
+    pub tcp_keepalive_idle: u64,
+
+    #[serde(
+        default = "default_tcp_keepalive_interval",
+        rename = "tcpKeepaliveInterval",
+        alias = "tcp_keepalive_interval"
+    )]
+    pub tcp_keepalive_interval: u64,
+
+    #[serde(
         default = "default_heartbeat_interval",
         rename = "heartbeatInterval",
         alias = "heartbeat_interval"
@@ -74,7 +88,7 @@ pub struct TransportConfig {
     )]
     pub heartbeat_timeout: i64,
     #[serde(default)]
-    pub quic: QuicOptions,
+    pub quic: QuicConfig,
 
     #[serde(default = "default_ws_path", rename = "wsPath", alias = "ws_path")]
     pub ws_path: String,
@@ -90,12 +104,20 @@ impl Default for TransportConfig {
             pool_count: default_pool_count(),
             tcp_mux: default_tcp_mux(),
             mux_keepalive_secs: default_mux_keepalive_secs(),
+            tcp_keepalive_idle: default_tcp_keepalive_idle(),
+            tcp_keepalive_interval: default_tcp_keepalive_interval(),
             heartbeat_interval: default_heartbeat_interval(),
             heartbeat_timeout: default_heartbeat_timeout(),
-            quic: QuicOptions::default(),
+            quic: QuicConfig::default(),
             ws_path: default_ws_path(),
             tls: ClientTlsConfig::default(),
         }
+    }
+}
+
+impl TransportConfig {
+    pub fn tcp_keepalive(&self) -> crate::net::TcpKeepaliveConfig {
+        crate::net::TcpKeepaliveConfig::new(self.tcp_keepalive_idle, self.tcp_keepalive_interval)
     }
 }
 
@@ -229,6 +251,14 @@ fn default_ws_path() -> String {
 
 fn default_mux_keepalive_secs() -> i64 {
     30
+}
+
+fn default_tcp_keepalive_idle() -> u64 {
+    crate::net::DEFAULT_TCP_KEEPALIVE_IDLE_SECS
+}
+
+fn default_tcp_keepalive_interval() -> u64 {
+    crate::net::DEFAULT_TCP_KEEPALIVE_INTERVAL_SECS
 }
 
 fn default_heartbeat_interval() -> i64 {

@@ -358,6 +358,7 @@ impl Control {
             let mut writer = self.writer.lock().await;
             let _ = writer.shutdown().await;
         }
+        self.connector.close();
         let mut tasks = self.data_tasks.lock().await;
         tasks.abort_all();
         while tasks.join_next().await.is_some() {}

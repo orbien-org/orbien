@@ -1,7 +1,7 @@
 {
   "name": "orbien-server-ui",
   "private": true,
-  "version": "3.6.1",
+  "version": "3.7.0-beta.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,9 @@
     "vue": "^3.5.22",
     "vue-i18n": "^11.4.8",
     "vue-router": "^4.5.1"
+  },
+  "overrides": {
+    "nanoid": "3.3.18"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

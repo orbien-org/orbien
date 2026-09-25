@@ -450,7 +450,7 @@ pub fn tunnel_to_parts(p: &TunnelConfig) -> TunnelParts {
         plugin_tls_term: tls_term.is_some(),
         plugin_local_addr: tls_term
             .map(|pl| pl.service.clone())
-            .unwrap_or_else(|| "127.0.0.1:80".into()),
+            .unwrap_or_else(|| "127.0.0.1:8080".into()),
         plugin_cert_file: tls_term.map(|pl| pl.cert_file.clone()).unwrap_or_default(),
         plugin_key_file: tls_term.map(|pl| pl.key_file.clone()).unwrap_or_default(),
         plugin_host_rewrite: tls_term

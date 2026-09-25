@@ -8,10 +8,10 @@ members = [
 ]
 
 [workspace.package]
-version = "3.6.1"
+version = "3.7.0-beta.1"
 edition = "2021"
 license = "Apache-2.0"
-authors = ["orbien"]
+authors = ["orbien-org","lxien"]
 
 
 [profile.release]
@@ -35,6 +35,7 @@ tokio = { version = "1", default-features = false, features = [
     "io-util",
     "sync",
     "time",
+    "signal",
 ] }
 tokio-util = { version = "0.7", features = ["io", "compat", "rt"] }
 yamux = "0.13"

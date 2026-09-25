@@ -133,6 +133,7 @@ pub async fn run_https_gw_listener(
     bind_addr: String,
     port: u16,
     gw: Arc<HttpsGw>,
+    keepalive: orbien_core::net::TcpKeepaliveConfig,
     shutdown: Arc<Notify>,
 ) -> Result<()> {
     let addr = format!("{bind_addr}:{port}");
@@ -145,7 +146,7 @@ pub async fn run_https_gw_listener(
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, peer)) => {
-                        orbien_core::net::enable_nodelay(&stream);
+                        orbien_core::net::tune_tcp_stream(&stream, keepalive);
                         let gw = Arc::clone(&gw);
                         tokio::spawn(async move {
                             if let Err(e) = handle_https_ingress(gw, stream, peer).await {

@@ -10,10 +10,11 @@ impl Service {
     pub(super) async fn run_tcp(self: Arc<Self>, listener: TcpListener) -> Result<()> {
         loop {
             let (stream, peer) = listener.accept().await?;
+            orbien_core::net::tune_tcp_stream(&stream, self.cfg.transport.tcp_keepalive());
             let svc = Arc::clone(&self);
             tokio::spawn(async move {
                 if let Err(e) = svc.handle_tcp_or_websocket(stream, peer).await {
-                    tracing::warn!(%peer, error = %e, "tcp/ws connection closed with error");
+                    tracing::warn!(%peer, error = %e, "tcp or ws connection closed with error");
                 }
             });
         }
