@@ -30,7 +30,7 @@ import org.slf4j.LoggerFactory;
 
 public final class OrbienClient implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(OrbienClient.class);
-    private static final String VERSION = "3.6.1-beta.1";
+    private static final String VERSION = "3.7.0-beta.1";
 
     private final OrbienClientConfig config;
     private final AtomicBoolean started = new AtomicBoolean(false);
