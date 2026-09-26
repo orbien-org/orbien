@@ -133,7 +133,6 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.dmg
             artifacts/*.zip
-            artifacts/*.exe
             artifacts/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

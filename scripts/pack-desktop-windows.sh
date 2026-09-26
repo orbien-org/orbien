@@ -81,8 +81,6 @@ mkdir -p "$STAGE"
 
 EXE_NAME="Orbien-Desktop.exe"
 cp "$BIN" "${STAGE}/${EXE_NAME}"
-STANDALONE="${OUTDIR}/orbien-desktop_${VERSION}_windows_${ARCH_LABEL}.exe"
-cp "$BIN" "$STANDALONE"
 
 cat > "${STAGE}/README.txt" <<EOF
 Orbien Desktop ${VERSION}
@@ -118,6 +116,5 @@ else
 fi
 
 rm -rf "$STAGE"
-echo "wrote ${STANDALONE}"
 echo "wrote ${ZIP_PATH}"
-ls -lh "$STANDALONE" "$ZIP_PATH"
+ls -lh "$ZIP_PATH"

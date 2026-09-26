@@ -80,7 +80,7 @@ jobs:
             --arch "${{ matrix.goarch }}" \
             --outdir dist/desktop
 
-      - name: Package Windows EXE + ZIP
+      - name: Package Windows ZIP
         if: matrix.artifact == 'windows'
         shell: bash
         run: |
@@ -108,6 +108,5 @@ jobs:
           path: |
             dist/desktop/*.dmg
             dist/desktop/*.zip
-            dist/desktop/*.exe
             dist/desktop/*.deb
           if-no-files-found: error

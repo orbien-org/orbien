@@ -5,7 +5,7 @@ WEB_DIR := server-ui
 
 web:
 	cd $(WEB_DIR) && npm install && npm run build
-	@echo "dashboard assets → server/assets"
+	@echo "dashboard assets -> server/assets"
 
 build:
 	cargo build -p orbien-server -p orbien-client
@@ -43,18 +43,18 @@ desktop-build:
 desktop-app desktop-dmg: desktop-build
 	chmod +x scripts/pack-desktop-macos.sh
 	./scripts/pack-desktop-macos.sh
-	@echo "app → dist/Orbien Desktop.app"
-	@echo "dmg → dist/orbien-desktop_*_darwin_*.dmg"
+	@echo "app -> dist/Orbien Desktop.app"
+	@echo "dmg -> dist/orbien-desktop_*_darwin_*.dmg"
 
 desktop-windows: desktop-build
 	chmod +x scripts/pack-desktop-windows.sh
 	./scripts/pack-desktop-windows.sh
-	@echo "exe/zip → dist/orbien-desktop_*_windows_*"
+	@echo "exe/zip -> dist/orbien-desktop_*_windows_*"
 
 desktop-deb: desktop-build
 	chmod +x scripts/pack-desktop-linux-deb.sh
 	./scripts/pack-desktop-linux-deb.sh
-	@echo "deb → dist/orbien-desktop_*_linux_*.deb"
+	@echo "deb -> dist/orbien-desktop_*_linux_*.deb"
 
 test:
 	cargo test --workspace

@@ -15,7 +15,7 @@ Run from the repository root. Build artifacts go to `target/`; packages go to `d
 | `make desktop-font-subset-full`         | Full SC regional fonts (~16 MB)                          |
 | `make desktop-build`                    | Release-build the desktop app                            |
 | `make desktop-app` / `make desktop-dmg` | Package macOS `.app` / `.dmg`                            |
-| `make desktop-windows`                  | Package Windows exe / zip (run on Windows)               |
+| `make desktop-windows`                  | Package Windows portable zip (run on Windows)            |
 | `make desktop-deb`                      | Package Linux `.deb` (run on Debian/Ubuntu)              |
 | `make package`                          | Run `release`, then copy binaries and `conf/` to `dist/` |
 | `make test`                             | Run workspace tests                                      |
