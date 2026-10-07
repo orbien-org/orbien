@@ -6,7 +6,7 @@
     "message": "Powered by Rust and Tokio"
   },
   "homepage.hero.desc": {
-    "message": "Lightweight, high-performance, and secure NAT traversal — binary size about 5MB"
+    "message": "A lightweight, high-performance, and secure tunneling tool (~5 MB binary) for exposing local services to the public internet"
   },
   "homepage.hero.ctaStart": {
     "message": "Get Started"
