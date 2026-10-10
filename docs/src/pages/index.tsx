@@ -55,7 +55,7 @@ function HomepageHeader(): ReactNode {
                     </p>
                     <p className={styles.heroDesc}>
                         <Translate id="homepage.hero.desc">
-                            轻量、高性能、安全的内网穿透，二进制体积大约5MB
+                            轻量、高性能、安全的内网穿透，二进制体积大约 5MB
                         </Translate>
                     </p>
                     <div className={styles.heroActions}>
@@ -103,7 +103,7 @@ function DesktopShowcase(): ReactNode {
                     </Heading>
                     <p className={styles.desktopDesc}>
                         <Translate id="homepage.desktop.desc">
-                            纯Rust原生桌面客户端，通过可视化界面轻松管理隧道配置
+                            纯 Rust 原生桌面客户端，通过可视化界面轻松管理隧道配置
                         </Translate>
                     </p>
                     <Link
