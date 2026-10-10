@@ -1,7 +1,7 @@
 ---
-sidebar_position: 4
-sidebar_label: Docker 安装
-title: Docker 安装
+sidebar_position: 2
+sidebar_label: Docker
+title: Docker
 ---
 
 # Docker 安装
@@ -71,7 +71,7 @@ docker compose up -d
 
 </div>
 
-配置里写 <code>{'{{env.NAME}}'}</code>，用 `-e` 或 Compose `environment` 传入。语法见 [环境变量](./features/env.md)。
+配置里写 <code>{'{{env.NAME}}'}</code>，用 `-e` 或 Compose `environment` 传入。语法见 [环境变量](../features/env.md)。
 
 ```toml
 #orbien-server.toml

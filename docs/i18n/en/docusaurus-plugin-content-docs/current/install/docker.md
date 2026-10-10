@@ -71,7 +71,7 @@ docker compose up -d
 
 </div>
 
-Write <code>{'{{env.NAME}}'}</code> in the config, then pass values with `-e` or Compose `environment`. See [Environment Variables](./features/env.md) for the syntax.
+Write <code>{'{{env.NAME}}'}</code> in the config, then pass values with `-e` or Compose `environment`. See [Environment Variables](../features/env.md) for the syntax.
 
 ```toml
 #orbien-server.toml

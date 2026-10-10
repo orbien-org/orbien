@@ -22,5 +22,9 @@
   "sidebar.docsSidebar.category.集成": {
     "message": "Integrations",
     "description": "The label for category '集成' in sidebar 'docsSidebar'"
+  },
+  "sidebar.docsSidebar.category.安装": {
+    "message": "Install",
+    "description": "The label for category '安装' in sidebar 'docsSidebar'"
   }
 }
