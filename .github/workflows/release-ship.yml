@@ -128,7 +128,8 @@ jobs:
           name: v${{ inputs.version }}
           draft: false
           prerelease: ${{ contains(inputs.version, '-') }}
-          generate_release_notes: true
+          body_path: .github/RELEASE.md
+          generate_release_notes: false
           files: |
             artifacts/*.tar.gz
             artifacts/*.dmg
