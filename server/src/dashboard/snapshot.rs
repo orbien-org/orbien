@@ -3,6 +3,10 @@ use crate::dashboard::model::{ClientInfo, TunnelInfo};
 use crate::service::Service;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
+
+const SNAPSHOT_TUNNEL_TIMEOUT: Duration = Duration::from_millis(500);
 pub struct DashboardSnapshot {
     pub clients: Vec<ClientInfo>,
     pub tunnels: Vec<TunnelInfo>,
@@ -29,11 +33,19 @@ impl Service {
         let mut online_ids = std::collections::HashSet::new();
 
         for ctrl in &online {
-            let tunnel_count = ctrl.tunnel_count().await;
+            let closed = ctrl.is_closed();
+            let summaries = if closed {
+                Vec::new()
+            } else {
+                timeout(SNAPSHOT_TUNNEL_TIMEOUT, ctrl.tunnel_summaries())
+                    .await
+                    .unwrap_or_default()
+            };
+            let tunnel_count = summaries.len();
             online_ids.insert(ctrl.session_id.clone());
             let mut active_connections = 0usize;
             let mut client_tunnels = Vec::new();
-            for s in ctrl.tunnel_summaries().await {
+            for s in summaries {
                 *tunnel_type_count.entry(s.tunnel_type.clone()).or_default() += 1;
                 let traffic = self.metrics.tunnel_snapshot(&s.name);
                 let tunnel_conns = traffic.as_ref().map(|t| t.active_connections).unwrap_or(0);
@@ -65,15 +77,21 @@ impl Service {
                 tunnel_count,
                 active_connections,
                 connected_secs: ctrl.connected_at.elapsed().as_secs(),
-                status: "online".into(),
+                status: if closed {
+                    "offline".into()
+                } else {
+                    "online".into()
+                },
             });
             tunnels.extend(client_tunnels);
         }
 
         for rec in agents {
-            if rec.online || online_ids.contains(&rec.session_id) {
+            if online_ids.contains(&rec.session_id) {
                 continue;
             }
+            // A leaked `online` record has no control behind it. Show it as
+            // offline so the duplicate agent id is visible in the dashboard.
             clients.push(ClientInfo {
                 session_id: rec.session_id.clone(),
                 agent_id: rec.agent_id.clone(),

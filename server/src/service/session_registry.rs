@@ -1,6 +1,6 @@
 use super::agent_registry::{
-    sanitize_wire_id, AgentOnlineSpec, AgentRegisterError, MAX_AGENT_ID_LEN, MAX_SESSION_ID_LEN,
-    MAX_USER_LEN,
+    sanitize_wire_id, AgentConflict, AgentOnlineSpec, AgentRegisterError, MAX_AGENT_ID_LEN,
+    MAX_SESSION_ID_LEN, MAX_USER_LEN,
 };
 use super::session_table::{self, remove_if_current, swap_in_locked};
 use super::Service;
@@ -13,7 +13,15 @@ use orbien_core::VERSION;
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::timeout;
 use uuid::Uuid;
+
+const CONFLICT_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+const TAKEOVER_REMOVE_TIMEOUT: Duration = Duration::from_secs(3);
+const TAKEOVER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+const TEARDOWN_REMOVE_TIMEOUT: Duration = Duration::from_secs(3);
+const TEARDOWN_TUNNEL_COUNT_TIMEOUT: Duration = Duration::from_secs(2);
 
 impl Service {
     pub(crate) async fn register_control(
@@ -107,7 +115,7 @@ impl Service {
             old.shutdown().await;
         }
 
-        match self.agents.try_online(AgentOnlineSpec {
+        let spec = AgentOnlineSpec {
             user: user.clone(),
             agent_id: agent_id.clone(),
             session_id: session_id.clone(),
@@ -117,22 +125,34 @@ impl Service {
             arch: control.arch.clone(),
             client_ip: control.client_ip.clone(),
             version: control.version.clone(),
-        }) {
+        };
+
+        match self.agents.try_online(spec.clone()) {
             Ok(_) => {}
-            Err(AgentRegisterError::Conflict) => {
-                drop(session_guard);
-                let _ = remove_if_current(&self.controls, &session_id, &control).await;
-                let err = format!("agent_id [{agent_id}] for user [{user}] is already online");
-                let _ = control.send_login_err(VERSION, &err).await;
-                control.shutdown().await;
-                return Err(anyhow!(err));
+            Err(AgentRegisterError::Conflict(conflict)) => {
+                if !self.take_over_conflict(&conflict).await
+                    || self.agents.try_online(spec).is_err()
+                {
+                    drop(session_guard);
+                    return reject_control(
+                        &self.controls,
+                        &session_id,
+                        &control,
+                        format!("agent_id [{agent_id}] for user [{user}] is already online"),
+                    )
+                    .await;
+                }
             }
         }
 
         if let Err(e) = control.send_login_ok(VERSION).await {
             self.agents.release(&session_id, generation, 0);
             drop(session_guard);
-            let _ = remove_if_current(&self.controls, &session_id, &control).await;
+            let _ = timeout(
+                TEARDOWN_REMOVE_TIMEOUT,
+                remove_if_current(&self.controls, &session_id, &control),
+            )
+            .await;
             control.shutdown().await;
             return Err(e);
         }
@@ -156,14 +176,120 @@ impl Service {
         let rid = session_id.clone();
         let result = Arc::clone(&control).run().await;
 
-        let tunnel_count = control.tunnel_count().await;
+        let tunnel_count = timeout(TEARDOWN_TUNNEL_COUNT_TIMEOUT, control.tunnel_count())
+            .await
+            .unwrap_or(0);
         control.shutdown().await;
-        if remove_if_current(&controls, &rid, &control).await {
+        let removed = timeout(
+            TEARDOWN_REMOVE_TIMEOUT,
+            remove_if_current(&controls, &rid, &control),
+        )
+        .await
+        .unwrap_or(false);
+        if removed {
             agents.release(&rid, generation, tunnel_count);
+        } else {
+            let still_current = {
+                let map = controls.lock().await;
+                map.get(&rid)
+                    .map(|e| Arc::ptr_eq(&e.control, &control))
+                    .unwrap_or(false)
+            };
+            if !still_current {
+                agents.force_release(&rid, Some(generation), tunnel_count);
+            }
         }
+        self.release_stale_tunnel_slots(&rid, generation);
         metrics.close_client();
 
         result
+    }
+
+    /// Replace an old session that is no longer serving traffic.
+    ///
+    /// A record can stay `online` in `agents` after its control teardown
+    /// failed, which used to make every restart fail with "already online".
+    /// We only take over when the old control is missing, closed, heartbeat
+    /// stale, or has no tunnels; a healthy session with tunnels still wins.
+    async fn take_over_conflict(&self, conflict: &AgentConflict) -> bool {
+        let old = {
+            let map = self.controls.lock().await;
+            map.get(&conflict.session_id)
+                .map(|entry| Arc::clone(&entry.control))
+        };
+
+        let (present, closed, heartbeat_stale, tunnel_count) = match old.as_ref() {
+            Some(old) => {
+                let closed = old.is_closed();
+                let heartbeat_stale = old.is_heartbeat_stale();
+                let tunnels = if closed || heartbeat_stale {
+                    Some(0)
+                } else {
+                    old.try_tunnel_count(CONFLICT_PROBE_TIMEOUT).await
+                };
+                (true, closed, heartbeat_stale, tunnels)
+            }
+            None => (false, false, false, None),
+        };
+
+        if resolve_conflict(present, closed, heartbeat_stale, tunnel_count)
+            == ConflictResolution::Reject
+        {
+            return false;
+        }
+
+        tracing::warn!(
+            session_id = %conflict.session_id,
+            generation = conflict.generation,
+            agent_id = %conflict.agent_id,
+            old_tunnels = tunnel_count.unwrap_or(conflict.tunnel_count),
+            control_present = present,
+            control_closed = closed,
+            heartbeat_stale,
+            "taking over stale agent session"
+        );
+
+        if let Some(old) = old {
+            let removed = timeout(
+                TAKEOVER_REMOVE_TIMEOUT,
+                remove_if_current(&self.controls, &old.session_id, &old),
+            )
+            .await;
+            if !matches!(removed, Ok(true)) {
+                let mut map = self.controls.lock().await;
+                if map
+                    .get(&old.session_id)
+                    .map(|entry| Arc::ptr_eq(&entry.control, &old))
+                    .unwrap_or(false)
+                {
+                    map.remove(&old.session_id);
+                }
+            }
+
+            if timeout(TAKEOVER_SHUTDOWN_TIMEOUT, old.shutdown())
+                .await
+                .is_err()
+            {
+                tracing::warn!(
+                    session_id = %old.session_id,
+                    generation = old.generation,
+                    "old control shutdown timed out during takeover"
+                );
+            }
+            old.abandon_tunnels_now();
+        }
+
+        // Free any global tunnel names and ports still owned by the stale
+        // generation. Without this a restarted client can log in but every
+        // tunnel registration fails with "already registered".
+        self.release_stale_tunnel_slots(&conflict.session_id, conflict.generation);
+
+        self.agents.force_release(
+            &conflict.session_id,
+            Some(conflict.generation),
+            tunnel_count.unwrap_or(conflict.tunnel_count),
+        );
+        true
     }
 
     pub(crate) async fn register_data_conn(
@@ -218,7 +344,95 @@ async fn reject_login(mut stream: DynStream, error: &str) -> Result<()> {
     Err(anyhow!(error.to_string()))
 }
 
+async fn reject_control(
+    controls: &tokio::sync::Mutex<session_table::SessionMap>,
+    session_id: &str,
+    control: &Arc<Control>,
+    error: String,
+) -> Result<()> {
+    let _ = timeout(
+        TAKEOVER_REMOVE_TIMEOUT,
+        remove_if_current(controls, session_id, control),
+    )
+    .await;
+    let _ = control.send_login_err(VERSION, &error).await;
+    control.shutdown().await;
+    Err(anyhow!(error))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConflictResolution {
+    Reject,
+    Takeover,
+}
+
+fn resolve_conflict(
+    control_present: bool,
+    closed: bool,
+    heartbeat_stale: bool,
+    tunnel_count: Option<usize>,
+) -> ConflictResolution {
+    if !control_present || closed || heartbeat_stale {
+        return ConflictResolution::Takeover;
+    }
+    match tunnel_count {
+        Some(0) => ConflictResolution::Takeover,
+        Some(_) => ConflictResolution::Reject,
+        // We could not inspect the old control; assume it is still serving.
+        None => ConflictResolution::Reject,
+    }
+}
+
 fn short_session_id() -> String {
     let hex = Uuid::new_v4().simple().to_string();
     hex[..16].to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{resolve_conflict, ConflictResolution};
+
+    #[test]
+    fn missing_control_is_taken_over() {
+        assert_eq!(
+            resolve_conflict(false, false, false, None),
+            ConflictResolution::Takeover
+        );
+    }
+
+    #[test]
+    fn closed_or_stale_control_is_taken_over() {
+        assert_eq!(
+            resolve_conflict(true, true, false, Some(2)),
+            ConflictResolution::Takeover
+        );
+        assert_eq!(
+            resolve_conflict(true, false, true, Some(2)),
+            ConflictResolution::Takeover
+        );
+    }
+
+    #[test]
+    fn zero_tunnel_control_is_taken_over() {
+        assert_eq!(
+            resolve_conflict(true, false, false, Some(0)),
+            ConflictResolution::Takeover
+        );
+    }
+
+    #[test]
+    fn healthy_control_with_tunnels_is_kept() {
+        assert_eq!(
+            resolve_conflict(true, false, false, Some(2)),
+            ConflictResolution::Reject
+        );
+    }
+
+    #[test]
+    fn unknown_tunnel_count_is_kept() {
+        assert_eq!(
+            resolve_conflict(true, false, false, None),
+            ConflictResolution::Reject
+        );
+    }
 }
