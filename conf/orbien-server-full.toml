@@ -40,6 +40,10 @@ port = 8020
 user = "admin"
 password = "123456"
 
+# [dashboard.tls]
+# certFile = "./certs/dashboard.crt"
+# keyFile = "./certs/dashboard.key"
+
 [log]
 file = "./orbien-server.log"
 level = "info"

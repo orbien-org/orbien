@@ -132,6 +132,38 @@ pub struct DashboardConfig {
     pub user: String,
     #[serde(default)]
     pub password: String,
+
+    #[serde(default)]
+    pub tls: DashboardTlsConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DashboardTlsConfig {
+    #[serde(default, rename = "certFile", alias = "cert_file")]
+    pub cert_file: String,
+    #[serde(default, rename = "keyFile", alias = "key_file")]
+    pub key_file: String,
+}
+
+impl DashboardTlsConfig {
+    pub fn enabled(&self) -> bool {
+        !self.cert_file.trim().is_empty() && !self.key_file.trim().is_empty()
+    }
+
+    pub fn validate(&self) -> anyhow::Result<()> {
+        let cert = self.cert_file.trim();
+        let key = self.key_file.trim();
+        match (cert.is_empty(), key.is_empty()) {
+            (true, true) => Ok(()),
+            (false, false) => Ok(()),
+            (false, true) => anyhow::bail!(
+                "dashboard.tls.keyFile is required when dashboard.tls.certFile is set"
+            ),
+            (true, false) => anyhow::bail!(
+                "dashboard.tls.certFile is required when dashboard.tls.keyFile is set"
+            ),
+        }
+    }
 }
 
 impl DashboardConfig {
@@ -156,6 +188,7 @@ impl DashboardConfig {
                 "dashboard.user and dashboard.password are required when dashboard.port > 0"
             );
         }
+        self.tls.validate()?;
         Ok(())
     }
 }
@@ -358,6 +391,10 @@ impl ServerConfig {
         tls.cert_file = super::resolve_maybe_relative(base, &tls.cert_file);
         tls.key_file = super::resolve_maybe_relative(base, &tls.key_file);
         tls.trusted_ca_file = super::resolve_maybe_relative(base, &tls.trusted_ca_file);
+
+        let dash_tls = &mut self.dashboard.tls;
+        dash_tls.cert_file = super::resolve_maybe_relative(base, &dash_tls.cert_file);
+        dash_tls.key_file = super::resolve_maybe_relative(base, &dash_tls.key_file);
     }
 
     pub fn from_defaults() -> Self {

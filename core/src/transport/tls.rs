@@ -142,6 +142,22 @@ fn load_ca_roots(ca_path: &str) -> Result<RootCertStore> {
     Ok(roots)
 }
 
+pub fn load_server_cert_key(cert_file: &str, key_file: &str) -> Result<Arc<ServerConfig>> {
+    install_ring_provider()?;
+    let cert = cert_file.trim();
+    let key = key_file.trim();
+    if cert.is_empty() || key.is_empty() {
+        bail!("certFile and keyFile are required");
+    }
+    let (certs, key) = load_pem_cert_key(cert, key)?;
+    let mut cfg = ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .context("build rustls ServerConfig")?;
+    cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok(Arc::new(cfg))
+}
+
 pub fn new_server_tls_config(
     cert_file: &str,
     key_file: &str,

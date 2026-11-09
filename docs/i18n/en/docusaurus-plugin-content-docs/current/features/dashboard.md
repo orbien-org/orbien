@@ -21,9 +21,14 @@ addr = "0.0.0.0"
 port = 8020
 user = "admin"
 password = "123456"
+
+# Optional
+# [dashboard.tls]
+# certFile = "./certs/dashboard.crt"
+# keyFile = "./certs/dashboard.key"
 ```
 
-Open `http://SERVER_IP:8020` in a browser and sign in with username and password in the login dialog.
+Open `http://SERVER_IP:8020` in a browser (use `https://` when `[dashboard.tls]` is enabled).
 
 :::tip
 `addr` defaults to `127.0.0.1` (localhost only). Set it to `0.0.0.0` for remote access.
@@ -31,9 +36,16 @@ Open `http://SERVER_IP:8020` in a browser and sign in with username and password
 
 ## Parameters
 
-| Parameter               | Required | Default       | Description                                  |
-|-------------------------|----------|---------------|----------------------------------------------|
-| `dashboard.addr`        | No       | `127.0.0.1`   | Listen address; use `0.0.0.0` for remote access |
-| `dashboard.port`        | Yes      | `0`           | Listen port; `0` disables the dashboard      |
-| `dashboard.user`        | Yes      |               | Login username                               |
-| `dashboard.password`    | Yes      |               | Login password                               |
+| Parameter                | Required | Default     | Description                                    |
+|--------------------------|----------|-------------|------------------------------------------------|
+| `dashboard.addr`         | No       | `127.0.0.1` | Listen address; use `0.0.0.0` for remote access |
+| `dashboard.port`         | Yes      | `0`         | Listen port; `0` disables the dashboard        |
+| `dashboard.user`         | Yes      |             | Username                                       |
+| `dashboard.password`     | Yes      |             | Password                                       |
+| `dashboard.tls.certFile` | No       |             | Path to the PEM certificate                    |
+| `dashboard.tls.keyFile`  | No       |             | Path to the PEM private key                    |
+
+:::info[Note]
+
+- Both `certFile` and `keyFile` must be set to enable HTTPS
+:::
