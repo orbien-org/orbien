@@ -38,7 +38,7 @@ jobs:
             goos: darwin
             goarch: amd64
             artifact: dmg
-          - os: macos-14
+          - os: macos-15
             goos: darwin
             goarch: arm64
             artifact: dmg

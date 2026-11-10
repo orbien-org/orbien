@@ -50,7 +50,7 @@ jobs:
             target: x86_64-apple-darwin
             goos: darwin
             goarch: amd64
-          - os: macos-14
+          - os: macos-15
             target: aarch64-apple-darwin
             goos: darwin
             goarch: arm64
