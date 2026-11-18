@@ -31,4 +31,26 @@ impl PortTable {
             map.remove(&port);
         }
     }
+
+    /// Drop every port claimed by a tunnel name.
+    pub fn release_name(&self, tunnel_name: &str) {
+        let mut map = self.by_port.lock().unwrap_or_else(|e| e.into_inner());
+        map.retain(|_, name| name != tunnel_name);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_name_frees_only_matching_tunnel() {
+        let ports = PortTable::new();
+        ports.claim(9001, "a").unwrap();
+        ports.claim(9002, "b").unwrap();
+
+        ports.release_name("a");
+        ports.claim(9001, "c").unwrap();
+        assert!(ports.claim(9002, "c").is_err());
+    }
 }

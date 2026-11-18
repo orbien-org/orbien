@@ -86,17 +86,14 @@ impl TunnelManager {
         }
     }
 
-    pub async fn close_all(&mut self) -> Vec<(String, DetachedTunnel)> {
-        let mut closed = Vec::with_capacity(self.tunnels.len());
-        for (name, entry) in self.tunnels.drain() {
-            let detached = DetachedTunnel {
-                tunnel_type: entry.tunnel.tunnel_type(),
-                remote_port: entry.tunnel.remote_port(),
-            };
-            entry.tunnel.close().await;
-            closed.push((name, detached));
-        }
-        closed
+    /// Remove every tunnel from the manager without awaiting any close.
+    /// Callers can release global slots and close the returned tunnels after
+    /// dropping the manager lock.
+    pub fn drain_all(&mut self) -> Vec<(String, RegisteredTunnel)> {
+        self.tunnels
+            .drain()
+            .map(|(name, entry)| (name, entry.tunnel))
+            .collect()
     }
 
     pub fn abandon_all(&mut self) -> Vec<(String, DetachedTunnel)> {

@@ -5,7 +5,8 @@ mod session_table;
 
 use crate::metrics::MemMetrics;
 use crate::tunnel::{
-    run_http_gw_listener, run_https_gw_listener, HttpGw, HttpsGw, PortTable, TunnelRegistry,
+    run_http_gw_listener, run_https_gw_listener, HttpGw, HttpsGw, PortTable, TunnelOwner,
+    TunnelRegistry,
 };
 use agent_registry::AgentRegistry;
 use anyhow::{anyhow, Result};
@@ -17,9 +18,15 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Notify};
 use tokio::task::JoinSet;
+use tokio::time::timeout;
+
+const KICK_GATE_TIMEOUT: Duration = Duration::from_secs(2);
+const KICK_TUNNEL_COUNT_TIMEOUT: Duration = Duration::from_secs(2);
+const KICK_TIMEOUT: Duration = Duration::from_secs(12);
 
 pub struct Service {
     cfg: ServerConfig,
@@ -184,16 +191,45 @@ impl Service {
         &self.metrics
     }
 
+    /// Release global tunnel names/ports owned by a generation whose control
+    /// teardown did not finish.
+    pub(crate) fn release_stale_tunnel_slots(&self, session_id: &str, generation: u64) {
+        let owner = TunnelOwner {
+            session_id: session_id.to_string(),
+            generation,
+        };
+        for name in self.tunnel_registry.remove_owner(&owner) {
+            self.tcp_ports.release_name(&name);
+            self.udp_ports.release_name(&name);
+        }
+    }
+
     pub async fn kick_client(&self, session_id: &str) -> Result<()> {
         let (gate, control) = {
             let map = self.controls.lock().await;
             match map.get(session_id) {
                 Some(entry) => (Arc::clone(&entry.gate), Arc::clone(&entry.control)),
-                None => return Err(anyhow!("client not online: {session_id}")),
+                None => {
+                    // The control is gone but a failed teardown may have left
+                    // the agent marked online. Clear it so a restart can log in.
+                    let generation = self.agents.get(session_id).map(|e| e.generation);
+                    if let Some(generation) = generation {
+                        if self.agents.force_release(session_id, Some(generation), 0) {
+                            self.release_stale_tunnel_slots(session_id, generation);
+                            tracing::warn!(
+                                %session_id,
+                                generation,
+                                "cleared stale agent record without a control"
+                            );
+                            return Ok(());
+                        }
+                    }
+                    return Err(anyhow!("client not online: {session_id}"));
+                }
             }
         };
 
-        let guard = gate.lock_owned().await;
+        let guard = timeout(KICK_GATE_TIMEOUT, gate.lock_owned()).await;
         {
             let map = self.controls.lock().await;
             let still = map
@@ -201,13 +237,28 @@ impl Service {
                 .map(|e| Arc::ptr_eq(&e.control, &control))
                 .unwrap_or(false);
             if !still {
-                return Err(anyhow!("client not online: {session_id}"));
+                self.agents
+                    .force_release(session_id, Some(control.generation), 0);
+                self.release_stale_tunnel_slots(session_id, control.generation);
+                return Ok(());
             }
         }
 
-        let tunnel_count = control.tunnel_count().await;
+        let tunnel_count = timeout(KICK_TUNNEL_COUNT_TIMEOUT, control.tunnel_count())
+            .await
+            .unwrap_or(0);
         let generation = control.generation;
-        control.kick("kicked from dashboard").await;
+        if timeout(KICK_TIMEOUT, control.kick("kicked from dashboard"))
+            .await
+            .is_err()
+        {
+            tracing::warn!(
+                %session_id,
+                generation,
+                "control kick timed out; force-removing session"
+            );
+            control.abandon_tunnels_now();
+        }
 
         {
             let mut map = self.controls.lock().await;
@@ -221,7 +272,9 @@ impl Service {
         }
         drop(guard);
 
-        self.agents.release(session_id, generation, tunnel_count);
+        self.agents
+            .force_release(session_id, Some(generation), tunnel_count);
+        self.release_stale_tunnel_slots(session_id, generation);
         Ok(())
     }
 }

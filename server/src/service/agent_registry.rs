@@ -35,9 +35,18 @@ pub struct AgentOnlineSpec {
     pub version: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentConflict {
+    pub user: String,
+    pub agent_id: String,
+    pub session_id: String,
+    pub generation: u64,
+    pub tunnel_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentRegisterError {
-    Conflict,
+    Conflict(AgentConflict),
 }
 
 #[derive(Debug, Default)]
@@ -70,7 +79,13 @@ impl AgentRegistry {
                     && !existing.session_id.is_empty()
                     && existing.session_id != spec.session_id
                 {
-                    return Err(AgentRegisterError::Conflict);
+                    return Err(AgentRegisterError::Conflict(AgentConflict {
+                        user: existing.user.clone(),
+                        agent_id: existing.agent_id.clone(),
+                        session_id: existing.session_id.clone(),
+                        generation: existing.generation,
+                        tunnel_count: existing.tunnel_count,
+                    }));
                 }
             }
         }
@@ -156,6 +171,54 @@ impl AgentRegistry {
         }
     }
 
+    pub fn get(&self, session_id: &str) -> Option<AgentEntry> {
+        let by_key = self.by_key.lock().unwrap_or_else(|e| e.into_inner());
+        let by_session = self.by_session.lock().unwrap_or_else(|e| e.into_inner());
+        let key = by_session.get(session_id)?;
+        by_key.get(key).cloned()
+    }
+
+    /// Clear a leaked online record even when its control teardown did not run.
+    ///
+    /// `generation` guards against clobbering a newer session that reused the
+    /// same session id. Returns true when an online entry was changed.
+    pub fn force_release(
+        &self,
+        session_id: &str,
+        generation: Option<u64>,
+        tunnel_count: usize,
+    ) -> bool {
+        let now = Instant::now();
+        let mut by_key = self.by_key.lock().unwrap_or_else(|e| e.into_inner());
+        let mut by_session = self.by_session.lock().unwrap_or_else(|e| e.into_inner());
+
+        let Some(key) = by_session.get(session_id).cloned() else {
+            return false;
+        };
+        let Some(entry) = by_key.get_mut(&key) else {
+            by_session.remove(session_id);
+            return false;
+        };
+        if entry.session_id != session_id || !entry.online {
+            return false;
+        }
+        if let Some(generation) = generation {
+            if entry.generation != generation {
+                return false;
+            }
+        }
+
+        let anonymous = entry.agent_id.is_empty();
+        if !anonymous {
+            set_offline(entry, now, tunnel_count);
+        }
+        by_session.remove(session_id);
+        if anonymous {
+            by_key.remove(&key);
+        }
+        true
+    }
+
     pub fn list(&self) -> Vec<AgentEntry> {
         self.by_key
             .lock()
@@ -193,4 +256,80 @@ pub fn sanitize_wire_id(raw: &str, max_len: usize) -> Result<String, &'static st
         return Err("identifier contains control characters");
     }
     Ok(s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(user: &str, agent_id: &str, session_id: &str, generation: u64) -> AgentOnlineSpec {
+        AgentOnlineSpec {
+            user: user.into(),
+            agent_id: agent_id.into(),
+            session_id: session_id.into(),
+            generation,
+            hostname: "host".into(),
+            os: "windows".into(),
+            arch: "x86_64".into(),
+            client_ip: "127.0.0.1".into(),
+            version: "test".into(),
+        }
+    }
+
+    #[test]
+    fn stale_generation_release_leaves_agent_online() {
+        let reg = AgentRegistry::new();
+        reg.try_online(spec("u", "agent-a", "s1", 1)).unwrap();
+
+        // This is the teardown bug: release is ignored when the generation
+        // captured by the old control no longer matches.
+        reg.release("s1", 2, 0);
+
+        let entry = reg.get("s1").expect("agent entry");
+        assert!(entry.online);
+        assert_eq!(entry.generation, 1);
+
+        let err = reg.try_online(spec("u", "agent-a", "s2", 2)).unwrap_err();
+        match err {
+            AgentRegisterError::Conflict(conflict) => {
+                assert_eq!(conflict.session_id, "s1");
+                assert_eq!(conflict.generation, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn force_release_clears_leaked_record_and_allows_new_session() {
+        let reg = AgentRegistry::new();
+        reg.try_online(spec("u", "agent-a", "s1", 1)).unwrap();
+        reg.release("s1", 2, 0);
+
+        assert!(reg.force_release("s1", Some(1), 0));
+        assert!(!reg.force_release("s1", Some(1), 0));
+
+        reg.try_online(spec("u", "agent-a", "s2", 2)).unwrap();
+        let entry = reg.get("s2").expect("new session");
+        assert!(entry.online);
+        assert_eq!(entry.session_id, "s2");
+        assert_eq!(entry.generation, 2);
+    }
+
+    #[test]
+    fn force_release_does_not_clobber_newer_generation() {
+        let reg = AgentRegistry::new();
+        reg.try_online(spec("u", "agent-a", "s1", 1)).unwrap();
+
+        assert!(!reg.force_release("s1", Some(2), 0));
+        assert!(reg.get("s1").unwrap().online);
+    }
+
+    #[test]
+    fn force_release_removes_anonymous_session() {
+        let reg = AgentRegistry::new();
+        reg.try_online(spec("u", "", "s1", 1)).unwrap();
+
+        assert!(reg.force_release("s1", Some(1), 0));
+        assert!(reg.get("s1").is_none());
+        assert!(reg.list().is_empty());
+    }
 }

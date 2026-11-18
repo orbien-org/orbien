@@ -16,13 +16,16 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{ReadHalf, WriteHalf};
 use tokio::sync::{mpsc, watch, Mutex, Notify};
 use tokio::task::JoinSet;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 type CtrlRead = ReadHalf<DynStream>;
 type CtrlWrite = WriteHalf<DynStream>;
 const KICK_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 const WRITER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const FINISHED_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+const TUNNEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const TUNNEL_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
+const BG_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub struct Control {
     pub session_id: String,
@@ -141,12 +144,29 @@ impl Control {
         self.activated.load(Ordering::Acquire) && !self.is_closed()
     }
 
+    /// True when no Ping arrived within the configured heartbeat window.
+    pub fn is_heartbeat_stale(&self) -> bool {
+        heartbeat_is_stale(
+            self.last_ping_unix.load(Ordering::Relaxed),
+            unix_now_secs(),
+            self.effective_ping_timeout(),
+        )
+    }
+
     pub async fn tunnel_summaries(&self) -> Vec<crate::tunnel::TunnelSummary> {
         self.tunnels.lock().await.summaries()
     }
 
     pub async fn tunnel_count(&self) -> usize {
         self.tunnels.lock().await.len()
+    }
+
+    /// Probe the tunnel count without risking an unbounded wait on the
+    /// tunnel manager lock.
+    pub async fn try_tunnel_count(&self, wait: Duration) -> Option<usize> {
+        timeout(wait, async { self.tunnels.lock().await.len() })
+            .await
+            .ok()
     }
 
     pub async fn wait_finished(&self) {
@@ -329,11 +349,51 @@ impl Control {
             let _ = tokio::time::timeout(FINISHED_WAIT_TIMEOUT, self.wait_finished()).await;
             return;
         }
-        {
+        // Drain the tunnel map under a bounded lock, then close the tunnels
+        // outside the lock. The old code held the lock while awaiting every
+        // close, so one stuck tunnel blocked tunnel_count(), kick and teardown.
+        let drained = match timeout(TUNNEL_DRAIN_TIMEOUT, async {
             let mut tm = self.tunnels.lock().await;
-            for (name, detached) in tm.close_all().await {
+            tm.drain_all()
+        })
+        .await
+        {
+            Ok(items) => Some(items),
+            Err(_) => {
+                tracing::warn!(
+                    session_id = %self.session_id,
+                    generation = self.generation,
+                    "tunnel manager lock timed out during shutdown"
+                );
+                None
+            }
+        };
+
+        if let Some(items) = drained {
+            let mut close_set = JoinSet::new();
+            for (name, tunnel) in items {
+                let detached = DetachedTunnel {
+                    tunnel_type: tunnel.tunnel_type(),
+                    remote_port: tunnel.remote_port(),
+                };
                 self.release_global_slot(&name, &detached);
                 self.metrics.close_tunnel(&name, detached.tunnel_type);
+                close_set.spawn(async move {
+                    tunnel.close().await;
+                });
+            }
+            if timeout(TUNNEL_CLOSE_TIMEOUT, async {
+                while close_set.join_next().await.is_some() {}
+            })
+            .await
+            .is_err()
+            {
+                tracing::warn!(
+                    session_id = %self.session_id,
+                    generation = self.generation,
+                    "tunnel close timed out during shutdown"
+                );
+                close_set.abort_all();
             }
         }
         {
@@ -355,9 +415,32 @@ impl Control {
         {
             let mut bg = self.bg_tasks.lock().await;
             bg.abort_all();
-            while bg.join_next().await.is_some() {}
+            if timeout(BG_SHUTDOWN_TIMEOUT, async {
+                while bg.join_next().await.is_some() {}
+            })
+            .await
+            .is_err()
+            {
+                tracing::warn!(
+                    session_id = %self.session_id,
+                    generation = self.generation,
+                    "background task shutdown timed out"
+                );
+                bg.abort_all();
+            }
         }
         self.mark_finished();
+    }
+
+    /// Force-drop any tunnels left behind when bounded shutdown could not
+    /// acquire the tunnel manager lock. Also frees their global name/port slots.
+    pub(crate) fn abandon_tunnels_now(&self) {
+        if let Ok(mut tm) = self.tunnels.try_lock() {
+            for (name, detached) in tm.abandon_all() {
+                self.release_global_slot(&name, &detached);
+                self.metrics.close_tunnel(&name, detached.tunnel_type);
+            }
+        }
     }
 
     pub async fn kick(&self, reason: impl Into<String>) {
@@ -418,6 +501,17 @@ impl Control {
     }
 }
 
+fn unix_now_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn heartbeat_is_stale(last_ping_unix: i64, now_unix: i64, timeout_secs: i64) -> bool {
+    timeout_secs > 0 && last_ping_unix > 0 && now_unix.saturating_sub(last_ping_unix) > timeout_secs
+}
+
 fn reap_join_set(bg: &mut JoinSet<()>) {
     while let Some(res) = bg.try_join_next() {
         if let Err(e) = res {
@@ -439,5 +533,26 @@ impl Drop for Control {
             }
         }
         self.mark_finished();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::heartbeat_is_stale;
+
+    #[test]
+    fn heartbeat_stale_after_configured_timeout() {
+        assert!(!heartbeat_is_stale(1_000, 1_089, 90));
+        assert!(heartbeat_is_stale(1_000, 1_091, 90));
+    }
+
+    #[test]
+    fn heartbeat_check_disabled_when_timeout_is_negative() {
+        assert!(!heartbeat_is_stale(1_000, 10_000, -1));
+    }
+
+    #[test]
+    fn heartbeat_check_ignores_missing_ping_timestamp() {
+        assert!(!heartbeat_is_stale(0, 10_000, 90));
     }
 }

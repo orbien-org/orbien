@@ -38,4 +38,43 @@ impl TunnelRegistry {
             map.remove(name);
         }
     }
+
+    /// Remove every name owned by a generation whose control is gone.
+    pub fn remove_owner(&self, owner: &TunnelOwner) -> Vec<String> {
+        let mut map = self.by_name.lock().unwrap_or_else(|e| e.into_inner());
+        let mut removed = Vec::new();
+        map.retain(|name, existing| {
+            if existing == owner {
+                removed.push(name.clone());
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn owner(session: &str, generation: u64) -> TunnelOwner {
+        TunnelOwner {
+            session_id: session.into(),
+            generation,
+        }
+    }
+
+    #[test]
+    fn remove_owner_only_removes_matching_generation() {
+        let reg = TunnelRegistry::new();
+        reg.try_insert("a", owner("s1", 1)).unwrap();
+        reg.try_insert("b", owner("s1", 2)).unwrap();
+
+        let removed = reg.remove_owner(&owner("s1", 1));
+        assert_eq!(removed, vec!["a".to_string()]);
+        assert!(reg.try_insert("b", owner("s2", 3)).is_err());
+        assert!(reg.try_insert("a", owner("s2", 3)).is_ok());
+    }
 }
