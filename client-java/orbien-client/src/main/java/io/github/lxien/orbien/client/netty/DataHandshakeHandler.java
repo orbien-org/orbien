@@ -15,7 +15,6 @@ import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.ReferenceCountUtil;
 
 import java.util.Map;
@@ -27,7 +26,6 @@ import org.slf4j.LoggerFactory;
 public final class DataHandshakeHandler extends ChannelInboundHandlerAdapter {
     private static final Logger log = LoggerFactory.getLogger(DataHandshakeHandler.class);
 
-    private final OrbienClientConfig config;
     private final EventLoopGroup group;
     private final Map<String, OrbienClientConfig.TunnelConfig> byName;
 
@@ -35,7 +33,6 @@ public final class DataHandshakeHandler extends ChannelInboundHandlerAdapter {
     private boolean headerDone;
 
     public DataHandshakeHandler(OrbienClientConfig config, EventLoopGroup group) {
-        this.config = config;
         this.group = group;
         this.byName = new ConcurrentHashMap<>();
         for (OrbienClientConfig.TunnelConfig p : config.getTunnels()) {
@@ -123,7 +120,7 @@ public final class DataHandshakeHandler extends ChannelInboundHandlerAdapter {
 
         Bootstrap b = new Bootstrap();
         b.group(group)
-                .channel(NioSocketChannel.class)
+                .channel(NettyEventLoopFactory.socketChannelClass())
                 .option(ChannelOption.TCP_NODELAY, true)
                 .option(ChannelOption.AUTO_READ, false)
                 .handler(new ChannelInitializer<SocketChannel>() {

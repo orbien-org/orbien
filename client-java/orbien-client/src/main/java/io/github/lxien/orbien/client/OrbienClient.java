@@ -6,18 +6,17 @@ import io.github.lxien.orbien.client.msg.MsgType;
 import io.github.lxien.orbien.client.msg.NewDataConn;
 import io.github.lxien.orbien.client.msg.WireMessage;
 import io.github.lxien.orbien.client.netty.ControlHandler;
+import io.github.lxien.orbien.client.netty.DataHandshakeHandler;
 import io.github.lxien.orbien.client.netty.MsgFrameDecoder;
 import io.github.lxien.orbien.client.netty.MsgFrameEncoder;
-import io.github.lxien.orbien.client.netty.DataHandshakeHandler;
+import io.github.lxien.orbien.client.netty.NettyEventLoopFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.channel.socket.nio.NioSocketChannel;
 
 import java.net.InetAddress;
 import java.util.concurrent.CompletableFuture;
@@ -62,13 +61,13 @@ public final class OrbienClient implements AutoCloseable {
             log.warn("auth.token is empty; authentication is disabled");
         }
 
-        group = new NioEventLoopGroup();
+        group = NettyEventLoopFactory.eventLoopGroup();
         CompletableFuture<String> loginFuture = new CompletableFuture<>();
 
         try {
             Bootstrap b = new Bootstrap();
             b.group(group)
-                    .channel(NioSocketChannel.class)
+                    .channel(NettyEventLoopFactory.socketChannelClass())
                     .option(ChannelOption.TCP_NODELAY, true)
                     .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 10_000)
                     .handler(new ChannelInitializer<SocketChannel>() {
@@ -128,7 +127,7 @@ public final class OrbienClient implements AutoCloseable {
         String rid = currentSessionId == null || currentSessionId.isEmpty() ? sessionId.get() : currentSessionId;
         Bootstrap b = new Bootstrap();
         b.group(group)
-                .channel(NioSocketChannel.class)
+                .channel(NettyEventLoopFactory.socketChannelClass())
                 .option(ChannelOption.TCP_NODELAY, true)
                 .handler(new ChannelInitializer<SocketChannel>() {
                     @Override
